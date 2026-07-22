@@ -6,6 +6,7 @@ import { link } from "./link";
 import { readConfig, resolveMappings } from "./mapping";
 import { toMilliunits } from "./money";
 import { detail, error, formatMilliunits, info, warn } from "./log";
+import { loadEnv } from "./env";
 import { run } from "./run";
 
 const USAGE = `
@@ -26,11 +27,14 @@ Options (sync):
   --threshold <usd>    Absolute floor for the safety guard (default 25000)
 
 Environment:
-  YNAB_API_TOKEN         required for sync and discover
-  YNAB_BUDGET_ID         required for sync and discover
+  YNAB_API_TOKEN         required for sync, link and discover
+  YNAB_BUDGET_ID         required for sync, link and discover
   SIMPLEFIN_ACCESS_URL   required for sync, link and discover
   SIMPLEFIN_MAP          optional mappings for CI: id=ACT-1+ACT-2;id2=ACT-3
   DRY_RUN=1              same as --dry-run
+
+Read from ./.env and ~/.config/ynab-simplefin-sync/.env when present.
+Real environment variables always win over both.
 `.trim();
 
 const requireEnv = (name: string): string => {
@@ -136,6 +140,8 @@ const sync = async (argv: string[]) => {
 const main = async () => {
     const argv = process.argv.slice(2);
     const command = argv.find((a) => !a.startsWith("--")) ?? "sync";
+
+    for (const path of loadEnv()) detail(`Loaded environment from ${path}`);
 
     switch (command) {
         case "sync":
