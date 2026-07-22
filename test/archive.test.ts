@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { mkdtempSync, readFileSync, statSync, readdirSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { writeSnapshot } from "../src/archive";
+import { writeSnapshot, filterAccounts } from "../src/archive";
 import type { SimpleFinAccountSet } from "../src/simplefin";
 
 const dir = () => mkdtempSync(join(tmpdir(), "yss-archive-"));
@@ -94,4 +94,57 @@ test("falls back to the typed set when no raw body was captured", () => {
 
 test("refuses a non-object snapshot rather than writing junk", () => {
     assert.throws(() => writeSnapshot(dir(), accountSet("not an object")), /not an object/);
+});
+
+test("filters to the configured accounts and reports what it dropped", () => {
+    const target = dir();
+    const result = writeSnapshot(
+        target,
+        accountSet(rawBody),
+        new Date("2026-07-22T12:00:00Z"),
+        ["ACT-1"],
+    );
+
+    const written = JSON.parse(readFileSync(result.path, "utf8"));
+
+    assert.equal(written.accounts.length, 1);
+    assert.equal(written.accounts[0].id, "ACT-1");
+    assert.deepEqual(result.excluded, ["ACT-2"]);
+    assert.deepEqual(result.missing, []);
+    // Counts reflect what was actually stored, not what was fetched.
+    assert.equal(result.transactions, 2);
+    assert.equal(result.holdings, 1);
+});
+
+test("an undefined filter archives everything", () => {
+    const target = dir();
+    const result = writeSnapshot(target, accountSet(rawBody), new Date("2026-07-22T12:00:00Z"), undefined);
+
+    assert.equal(result.accounts, 2);
+    assert.deepEqual(result.excluded, []);
+});
+
+test("reports configured ids the response did not contain", () => {
+    // A stale id would otherwise silently archive nothing, and the 90-day window makes that
+    // omission permanent.
+    const { missing, excluded } = filterAccounts(rawBody, ["ACT-1", "ACT-GONE"]);
+
+    assert.deepEqual(missing, ["ACT-GONE"]);
+    assert.deepEqual(excluded, ["ACT-2"]);
+});
+
+test("filtering leaves other top-level fields intact", () => {
+    const withErrors = { ...rawBody, errors: ["capped"], somethingElse: 42 };
+    const { raw } = filterAccounts(withErrors, ["ACT-1"]);
+
+    assert.deepEqual((raw as { errors: string[] }).errors, ["capped"]);
+    assert.equal((raw as { somethingElse: number }).somethingElse, 42);
+});
+
+test("an empty filter list archives nothing rather than everything", () => {
+    // Distinguishing [] from undefined matters: one is "exclude all", the other "include all".
+    const { raw, excluded } = filterAccounts(rawBody, []);
+
+    assert.deepEqual((raw as { accounts: unknown[] }).accounts, []);
+    assert.equal(excluded.length, 2);
 });

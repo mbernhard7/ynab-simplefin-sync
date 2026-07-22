@@ -2,7 +2,7 @@ import { API } from "ynab";
 import { getAccounts as getSimpleFinAccounts } from "./simplefin";
 import { reconcile, type AccountPlan, type ReconcileOptions } from "./reconcile";
 import { applyPlans, getAccounts as getYnabAccounts } from "./ynab";
-import { readConfig, resolveMappings } from "./config";
+import { readConfig, resolveArchiveAccounts, resolveMappings } from "./config";
 import { writeSnapshot } from "./archive";
 import { MAX_WINDOW_DAYS } from "./simplefin";
 import { detail, formatMilliunits, info, warn } from "./log";
@@ -14,6 +14,8 @@ export interface RunOptions extends ReconcileOptions {
     dryRun?: boolean;
     /** When set, the full 90-day response is written here before reconciling. */
     archiveDir?: string;
+    /** SimpleFIN account ids to archive. Omit to archive everything. */
+    archiveAccounts?: string[];
 }
 
 export interface RunSummary {
@@ -47,9 +49,11 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
     info("Fetching YNAB accounts...");
     const ynabAccounts = await getYnabAccounts(api, options.budgetId);
 
+    const config = readConfig();
+
     const mappings =
         options.mappings ??
-        resolveMappings(ynabAccounts, { config: readConfig(), env: process.env.SIMPLEFIN_MAP });
+        resolveMappings(ynabAccounts, { config, env: process.env.SIMPLEFIN_MAP });
 
     const bySource = mappings.reduce<Record<string, number>>((acc, m) => {
         const source = "source" in m ? String(m.source) : "note";
@@ -86,11 +90,21 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
     // and the 90-day window means anything missed today is unrecoverable later.
     if (options.archiveDir) {
         try {
-            const snapshot = writeSnapshot(options.archiveDir, accountSet);
+            const only = options.archiveAccounts ?? resolveArchiveAccounts(config);
+            const snapshot = writeSnapshot(options.archiveDir, accountSet, new Date(), only);
+
             info(
                 `Archived ${snapshot.accounts} account(s), ${snapshot.transactions} transaction(s), ` +
                 `${snapshot.holdings} holding(s) → ${snapshot.path} (${Math.round(snapshot.bytes / 1024)}KB)`,
             );
+            if (snapshot.excluded.length > 0) {
+                detail(`Excluded ${snapshot.excluded.length} account(s) by configuration.`);
+            }
+            // A stale id silently archives nothing for that account, and the 90-day window
+            // means the omission cannot be repaired later.
+            for (const id of snapshot.missing) {
+                warn(`Archive list names ${id}, which SimpleFIN did not return.`);
+            }
         } catch (err) {
             warn(`Archive failed: ${err instanceof Error ? err.message : String(err)}`);
         }

@@ -9,7 +9,48 @@ export interface SnapshotResult {
     accounts: number;
     transactions: number;
     holdings: number;
+    /** Account ids present in the response but excluded by the filter. */
+    excluded: string[];
+    /** Configured ids that the response did not contain — usually a stale or mistyped id. */
+    missing: string[];
 }
+
+const accountId = (account: unknown): string | undefined => {
+    const id = (account as { id?: unknown } | null)?.id;
+    return typeof id === "string" ? id : undefined;
+};
+
+/**
+ * Narrows the response to the given account ids, leaving every other top-level field intact
+ * so errors and metadata survive. Returns the ids dropped and the ids asked for but absent —
+ * the latter matters because a stale id would otherwise silently archive nothing.
+ */
+export const filterAccounts = (
+    raw: unknown,
+    only: string[] | undefined,
+): { raw: unknown; excluded: string[]; missing: string[] } => {
+    if (!only || typeof raw !== "object" || raw === null) {
+        return { raw, excluded: [], missing: [] };
+    }
+
+    const accounts = (raw as { accounts?: unknown }).accounts;
+    if (!Array.isArray(accounts)) return { raw, excluded: [], missing: [] };
+
+    const wanted = new Set(only);
+    const kept = accounts.filter((a) => {
+        const id = accountId(a);
+        return id !== undefined && wanted.has(id);
+    });
+
+    const excluded = accounts
+        .map(accountId)
+        .filter((id): id is string => id !== undefined && !wanted.has(id));
+
+    const present = new Set(accounts.map(accountId));
+    const missing = only.filter((id) => !present.has(id));
+
+    return { raw: { ...(raw as Record<string, unknown>), accounts: kept }, excluded, missing };
+};
 
 const countNested = (raw: unknown, key: "transactions" | "holdings"): number => {
     if (typeof raw !== "object" || raw === null) return 0;
@@ -35,12 +76,15 @@ export const writeSnapshot = (
     dir: string,
     accountSet: SimpleFinAccountSet,
     now = new Date(),
+    only?: string[],
 ): SnapshotResult => {
-    const raw = accountSet.raw ?? accountSet;
+    const source = accountSet.raw ?? accountSet;
 
-    if (typeof raw !== "object" || raw === null) {
+    if (typeof source !== "object" || source === null) {
         throw new Error("Refusing to archive a snapshot that is not an object.");
     }
+
+    const { raw, excluded, missing } = filterAccounts(source, only);
 
     mkdirSync(dir, { recursive: true });
 
@@ -58,5 +102,7 @@ export const writeSnapshot = (
             : 0,
         transactions: countNested(raw, "transactions"),
         holdings: countNested(raw, "holdings"),
+        excluded,
+        missing,
     };
 };

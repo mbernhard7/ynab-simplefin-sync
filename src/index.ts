@@ -11,7 +11,7 @@ export type { SimpleFinAccount, SimpleFinAccountSet, SimpleFinError } from "./si
 export { applyPlan, applyPlans, PAYEE_NAME } from "./ynab";
 export type { ApplyResult, ApplyOutcome } from "./ynab";
 export { toMilliunits } from "./money";
-export { writeSnapshot } from "./archive";
+export { writeSnapshot, filterAccounts } from "./archive";
 export type { SnapshotResult } from "./archive";
 export { run } from "./run";
 export { link, parseSelection, suggestFor } from "./link";
@@ -25,10 +25,14 @@ export {
     parseEnvMap,
     formatEnvMap,
     resolveBudgetId,
+    resolveArchiveAccounts,
+    parseArchiveList,
     resolveMappings,
     shadowedByNote,
 } from "./config";
 export type { AccountMapping, Config, MappingSource } from "./config";
 export { loadEnv, parseEnvFile, envFileCandidates, configEnvPath, shellQuote } from "./env";
 export { setup, upsertEnvFile } from "./setup";
+export { selectArchive } from "./selectArchive";
+export type { SelectArchiveOptions } from "./selectArchive";
 export type { SetupOptions } from "./setup";

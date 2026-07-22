@@ -8,6 +8,8 @@ import {
     parseEnvMap,
     readConfig,
     resolveBudgetId,
+    resolveArchiveAccounts,
+    parseArchiveList,
     resolveMappings,
     shadowedByNote,
     writeConfig,
@@ -164,4 +166,38 @@ test("suggestFor matches on shared name tokens and abstains when unsure", () => 
     assert.equal(suggestFor(ynab({ id: "a", name: "Robinhood Roth IRA" }), candidates), 1);
     assert.equal(suggestFor(ynab({ id: "a", name: "Checking" }), candidates), -1);
     assert.equal(suggestFor(ynab({ id: "a", name: "" }), candidates), -1);
+});
+
+test("parseArchiveList treats unset and 'all' as archive-everything", () => {
+    assert.equal(parseArchiveList(undefined), undefined);
+    assert.equal(parseArchiveList(""), undefined);
+    assert.equal(parseArchiveList("all"), undefined);
+    assert.equal(parseArchiveList("ALL"), undefined);
+    assert.deepEqual(parseArchiveList("ACT-1;ACT-2"), ["ACT-1", "ACT-2"]);
+    assert.deepEqual(parseArchiveList("ACT-1, ACT-2"), ["ACT-1", "ACT-2"]);
+    assert.deepEqual(parseArchiveList(" ACT-1 "), ["ACT-1"]);
+});
+
+test("archiveAccounts round-trips and the environment overrides it", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "yss-")), "config.json");
+    writeConfig({ version: 1, mappings: {}, archiveAccounts: ["ACT-cfg"] }, path);
+
+    const loaded = readConfig(path);
+    assert.deepEqual(loaded.archiveAccounts, ["ACT-cfg"]);
+
+    delete process.env.SIMPLEFIN_ARCHIVE_ACCOUNTS;
+    assert.deepEqual(resolveArchiveAccounts(loaded), ["ACT-cfg"]);
+
+    try {
+        process.env.SIMPLEFIN_ARCHIVE_ACCOUNTS = "ACT-env";
+        assert.deepEqual(resolveArchiveAccounts(loaded), ["ACT-env"]);
+
+        // "all" in the environment must override a narrowing config, not fall back to it.
+        process.env.SIMPLEFIN_ARCHIVE_ACCOUNTS = "all";
+        assert.equal(resolveArchiveAccounts(loaded), undefined);
+    } finally {
+        delete process.env.SIMPLEFIN_ARCHIVE_ACCOUNTS;
+    }
+
+    assert.equal(resolveArchiveAccounts({ version: 1, mappings: {} }), undefined);
 });

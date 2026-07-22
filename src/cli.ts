@@ -3,6 +3,7 @@ import { API } from "ynab";
 import { claimSetupToken, getAccounts as getSimpleFinAccounts } from "./simplefin";
 import { getAccounts as getYnabAccounts } from "./ynab";
 import { link } from "./link";
+import { selectArchive } from "./selectArchive";
 import { setup } from "./setup";
 import { configPath, readConfig, resolveBudgetId, resolveMappings } from "./config";
 import { toMilliunits } from "./money";
@@ -17,6 +18,7 @@ ynab-simplefin-sync — reconcile YNAB investment balances against SimpleFIN
   sync                 Fetch balances and post one adjustment per account per day (default)
   link                 Interactively pick YNAB accounts and their SimpleFIN counterparts
   discover             List SimpleFIN and YNAB accounts so they can be mapped
+  select-archive       Interactively pick which accounts the archive should include
   claim <setup-token>  Exchange a single-use Setup Token for a permanent Access URL
 
 Options (setup):
@@ -39,6 +41,9 @@ Secrets — environment only, never written to the config:
 Settings — config file, overridable by environment:
   YNAB_BUDGET_ID         else "budgetId" in the config
   SIMPLEFIN_MAP          else "mappings" in the config (id=ACT-1+ACT-2;id2=ACT-3)
+  SIMPLEFIN_ARCHIVE_ACCOUNTS
+                         else "archiveAccounts" in the config; "all" or unset archives
+                         every account (ACT-1;ACT-2)
 
 Other:
   DRY_RUN=1              same as --dry-run
@@ -192,6 +197,12 @@ const main = async () => {
                 accessUrl: requireEnv("SIMPLEFIN_ACCESS_URL"),
                 ynabToken: requireEnv("YNAB_API_TOKEN"),
                 budgetId: requireBudgetId(),
+                printOnly: argv.includes("--print-only"),
+            });
+            return;
+        case "select-archive":
+            await selectArchive({
+                accessUrl: requireEnv("SIMPLEFIN_ACCESS_URL"),
                 printOnly: argv.includes("--print-only"),
             });
             return;

@@ -24,6 +24,12 @@ export interface Config {
     version: 1;
     budgetId?: string;
     mappings: Record<string, { name?: string; simplefinIds: string[] }>;
+    /**
+     * SimpleFIN account ids to archive. Absent means archive everything, which is the safe
+     * default: SimpleFIN serves a rolling 90-day window, so anything filtered out today is
+     * gone for good.
+     */
+    archiveAccounts?: string[];
 }
 
 export const configDir = (): string =>
@@ -45,6 +51,12 @@ const parseConfig = (parsed: unknown, path: string): Config => {
 
     const budgetId = (parsed as { budgetId?: unknown }).budgetId;
     if (typeof budgetId === "string" && budgetId.length > 0) config.budgetId = budgetId;
+
+    const archive = (parsed as { archiveAccounts?: unknown }).archiveAccounts;
+    if (Array.isArray(archive)) {
+        const ids = archive.filter((id): id is string => typeof id === "string" && id.length > 0);
+        if (ids.length > 0) config.archiveAccounts = ids;
+    }
 
     const raw = (parsed as { mappings?: unknown }).mappings;
     if (typeof raw === "object" && raw !== null) {
@@ -134,6 +146,39 @@ export const formatEnvMap = (mappings: AccountMapping[]): string =>
 /** Environment wins, so CI and one-off overrides never need the config file touched. */
 export const resolveBudgetId = (config: Config = readConfig()): string | undefined =>
     process.env.YNAB_BUDGET_ID || config.budgetId;
+
+/**
+ * Parses `SIMPLEFIN_ARCHIVE_ACCOUNTS`. Accepts `;` or `,` separators, and the literal `all`
+ * to archive everything — which is also what an unset value means.
+ */
+export const parseArchiveList = (value?: string | null): string[] | undefined => {
+    if (value === undefined || value === null) return undefined;
+
+    const trimmed = value.trim();
+    if (trimmed === "") return undefined;
+    if (trimmed.toLowerCase() === "all") return undefined;
+
+    const ids = trimmed
+        .split(/[;,]/)
+        .map((id) => id.trim())
+        .filter((id) => id.length > 0);
+
+    return ids.length > 0 ? ids : undefined;
+};
+
+/**
+ * `undefined` means archive every account. Environment wins over config.
+ *
+ * Presence is checked before parsing: `all` parses to `undefined` (meaning everything), which
+ * is indistinguishable from "unset" once parsed. Falling back to the config there would let a
+ * deliberate `all` override silently keep narrowing — and an account missed today cannot be
+ * recovered after 90 days. An empty value counts as unset, so a blank CI secret is inert.
+ */
+export const resolveArchiveAccounts = (config: Config = readConfig()): string[] | undefined => {
+    const fromEnv = process.env.SIMPLEFIN_ARCHIVE_ACCOUNTS;
+    if (fromEnv !== undefined && fromEnv.trim() !== "") return parseArchiveList(fromEnv);
+    return config.archiveAccounts;
+};
 
 export interface ResolveSources {
     config?: Config;

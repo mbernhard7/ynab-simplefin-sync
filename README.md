@@ -144,6 +144,7 @@ SIMPLEFIN:ACT-8f3c1a02-...
 | `sync` (default) | Fetch balances, reconcile, write to YNAB |
 | `link` | Interactively pick YNAB accounts and their SimpleFIN counterparts |
 | `discover` | List SimpleFIN accounts and which YNAB accounts map to them |
+| `select-archive` | Interactively pick which accounts the archive should include |
 | `claim <token>` | Exchange a single-use Setup Token for an Access URL |
 
 | Flag | Applies to | Effect |
@@ -153,7 +154,8 @@ SIMPLEFIN:ACT-8f3c1a02-...
 | `--stale-hours <n>` | `sync` | Staleness threshold, default 36 |
 | `--threshold <usd>` | `sync` | Absolute floor for the guard, default 25000 |
 | `--skip-link` | `setup` | Stop after credentials and budget |
-| `--print-only` | `link` | Choose mappings and print them without saving |
+| `--archive <dir>` | `sync` | Also save the full 90-day response (also `ARCHIVE_DIR`) |
+| `--print-only` | `link`, `select-archive` | Choose and print without saving |
 
 Exit codes: `0` clean, `1` fatal, `2` completed but something needs a human — a failed write, a
 broken connection, or a tripped guard.
@@ -184,10 +186,41 @@ jobs:
           YNAB_BUDGET_ID: ${{ secrets.YNAB_BUDGET_ID }}
           SIMPLEFIN_ACCESS_URL: ${{ secrets.SIMPLEFIN_ACCESS_URL }}
           SIMPLEFIN_MAP: ${{ secrets.SIMPLEFIN_MAP }}
+          SIMPLEFIN_ARCHIVE_ACCOUNTS: ${{ secrets.SIMPLEFIN_ARCHIVE_ACCOUNTS }}
+          ARCHIVE_DIR: archive/data
 ```
 
 `SIMPLEFIN_MAP` is only needed for accounts mapped via `link` rather than a YNAB note — CI has
 no writable config directory. `link` prints the value to paste in.
+
+## Archiving
+
+SimpleFIN serves a rolling **90-day** transaction window and nothing older, so anything not
+captured is permanently lost. `--archive <dir>` (or `ARCHIVE_DIR`) writes the untouched response
+to `<dir>/simplefin-YYYY-MM-DD.json` on every run.
+
+It rides on the sync's existing request — the Bridge's quota counts requests, not bytes — so
+archiving 90 days of history costs no extra quota. The full window is re-fetched every run
+rather than incrementally, because institutions post late: an observed dividend transacted
+2026-06-23 posted on 2026-07-10.
+
+The raw body is stored rather than the parsed account set, so nothing is lost to this tool's
+schema — in particular `holdings`, which the Bridge returns as an extension beyond the published
+v2 spec. Files are uncompressed on purpose: consecutive snapshots overlap by ~99% and git deltas
+them to almost nothing, which per-file gzip would defeat.
+
+By default every account is archived. To narrow it:
+
+```bash
+ynab-simplefin-sync select-archive
+```
+
+That saves `archiveAccounts` to the config and prints a `SIMPLEFIN_ARCHIVE_ACCOUNTS` value for
+CI. Set it to `all` to archive everything, including accounts connected later.
+
+> [!WARNING]
+> Excluding an account is permanent in effect — once its transactions age past 90 days they
+> cannot be retrieved. Exclude only what you are certain you will never want.
 
 Running hourly is within quota but buys nothing, since the upstream data will not have changed.
 
@@ -231,6 +264,7 @@ the predecessor had no tests, which is much of why it drifted.
 |---|---|
 | `reconcile.ts` | Pure `(accounts, balances) → Plan[]`. All the logic. |
 | `config.ts` | Config file, note / config / env resolution |
+| `archive.ts` | Snapshot writing and account filtering |
 | `setup.ts` | Guided first run |
 | `link.ts` | Interactive picker |
 | `simplefin.ts` | Claim + `/accounts`, response validation |
