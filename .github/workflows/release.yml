@@ -32,26 +32,31 @@ jobs:
         with:
           fetch-depth: 0
 
+      # Trusted publishing needs npm >= 11.5.1 on Node >= 22.14.0.
       - uses: actions/setup-node@v4
         with:
-          node-version: 20
+          node-version: 22
           registry-url: https://registry.npmjs.org
+
+      - run: npm install -g npm@^11.5.1
 
       - run: npm ci
 
       # Runs before the version bump so a failing test never produces a tag.
       - run: npm test
 
-      - name: Check for publish credentials
+      # A trusted publisher can only be configured from an existing package's settings page,
+      # so the very first version has to go out by hand. Detecting that here keeps the repo
+      # green until then, and starts publishing on its own once the package exists.
+      - name: Check the package exists on npm
         id: creds
-        env:
-          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
         run: |
-          if [ -n "$NPM_TOKEN" ]; then
+          NAME="$(node -p "require('./package.json').name")"
+          if npm view "$NAME" version >/dev/null 2>&1; then
             echo "present=true" >> "$GITHUB_OUTPUT"
           else
             echo "present=false" >> "$GITHUB_OUTPUT"
-            echo "::notice::NPM_TOKEN is not set — tests ran, publish skipped."
+            echo "::notice::$NAME is not on npm yet. Publish the first version manually, then configure Trusted Publishing. Skipping publish."
           fi
 
       - name: Decide bump level
@@ -78,12 +83,12 @@ jobs:
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           npm version ${{ steps.bump.outputs.level }} -m "release: v%s [skip ci]"
 
+      # Authenticated by OIDC via Trusted Publishing — no token exists to leak. Provenance is
+      # signed automatically, so --provenance is not needed.
       # prepublishOnly rebuilds and re-runs the suite, so the tarball can only ship green.
       - name: Publish to npm
         if: steps.creds.outputs.present == 'true'
-        run: npm publish --provenance --access public
-        env:
-          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: npm publish --access public
 
       # Last on purpose: if publish fails, nothing lands on main and the next run
       # retries cleanly from the same version.

@@ -252,8 +252,20 @@ The bump commit is `release: vX.Y.Z [skip ci]`, which is what stops it retrigger
 workflow. Use `[skip ci]` in your own commit message to push without releasing, or run the
 workflow manually from the Actions tab to force a level.
 
-Requires an `NPM_TOKEN` repository secret (an npm **automation** token). Without it the workflow
-still runs the tests and skips the publish.
+Publishing uses npm [Trusted Publishing](https://docs.npmjs.com/trusted-publishers) — GitHub
+Actions authenticates over OIDC with short-lived, workflow-scoped credentials, so **no npm token
+exists anywhere**. Provenance is signed automatically.
+
+One-time setup, in order:
+
+1. Publish the first version by hand (`npm publish --otp=<code>`). A trusted publisher is
+   configured from the package's settings page, which requires the package to exist.
+2. On npmjs.com → the package → **Settings → Trusted Publisher → GitHub Actions**, set
+   organization/user, repository, and workflow filename `release.yml`.
+3. Optionally disallow token-based publishing for the package, which is the whole point.
+
+Until step 1 happens the workflow notices the package is absent, runs the tests, and skips the
+publish rather than failing — then starts publishing on its own once it exists.
 
 ## License
 
