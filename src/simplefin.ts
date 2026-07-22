@@ -32,6 +32,12 @@ export interface SimpleFinAccountSet {
     errlist: SimpleFinError[];
     /** v1 string errors, still emitted by the Bridge. Rate-limit warnings arrive here. */
     errors: string[];
+    /**
+     * The unmodified response body. Parsing deliberately narrows to the fields this tool
+     * models, which drops the Bridge's non-standard extensions — `holdings` above all. The
+     * archive stores this instead so nothing is lost to our schema.
+     */
+    raw?: unknown;
 }
 
 /**
@@ -117,19 +123,42 @@ const parseAccountSet = (body: unknown): SimpleFinAccountSet => {
     return { accounts, errlist, errors };
 };
 
+/** The Bridge caps any requested window at 90 days. */
+export const MAX_WINDOW_DAYS = 90;
+
+export interface GetAccountsOptions {
+    now?: Date;
+    /**
+     * Days of transaction history to request. Omit or 0 for balances only — the sync itself
+     * never reads transactions. The archive asks for the full window because institutions
+     * post transactions late: a dividend transacted 2026-06-23 posted on 2026-07-10.
+     */
+    days?: number;
+}
+
 /**
- * One GET covers every connected institution. We never read transactions, so the window is
- * pinned to "now" to keep the payload small — but note the Bridge counts this against a
- * ~24/day quota regardless of size.
+ * One GET covers every connected institution, and counts as one request against the Bridge's
+ * ~24/day quota regardless of the window size. Archiving therefore rides along on the sync's
+ * request rather than spending another.
  */
-export const getAccounts = async (accessUrl: string, now = new Date()): Promise<SimpleFinAccountSet> => {
+export const getAccounts = async (
+    accessUrl: string,
+    options: GetAccountsOptions = {},
+): Promise<SimpleFinAccountSet> => {
+    const now = options.now ?? new Date();
+    const days = Math.min(Math.max(options.days ?? 0, 0), MAX_WINDOW_DAYS);
+
     const base = accessUrl.replace(/\/+$/, "");
     const url = new URL(`${base}/accounts`);
 
-    // Ask for an empty transaction window; `balances-only` is honored by the Bridge and
-    // `start-date` in the near future is the portable fallback.
-    url.searchParams.set("balances-only", "1");
-    url.searchParams.set("start-date", String(Math.floor(now.getTime() / 1000)));
+    if (days === 0) {
+        // Empty window: `balances-only` is honored by the Bridge, and a `start-date` of now
+        // is the portable fallback.
+        url.searchParams.set("balances-only", "1");
+        url.searchParams.set("start-date", String(Math.floor(now.getTime() / 1000)));
+    } else {
+        url.searchParams.set("start-date", String(Math.floor(now.getTime() / 1000) - days * 86400));
+    }
 
     const username = decodeURIComponent(url.username);
     const password = decodeURIComponent(url.password);
@@ -158,5 +187,6 @@ export const getAccounts = async (accessUrl: string, now = new Date()): Promise<
         throw new Error(`SimpleFIN ${redactUrl(url.toString())} returned ${res.status} ${res.statusText}.`);
     }
 
-    return parseAccountSet(await res.json());
+    const body = await res.json();
+    return { ...parseAccountSet(body), raw: body };
 };

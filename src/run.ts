@@ -3,6 +3,8 @@ import { getAccounts as getSimpleFinAccounts } from "./simplefin";
 import { reconcile, type AccountPlan, type ReconcileOptions } from "./reconcile";
 import { applyPlans, getAccounts as getYnabAccounts } from "./ynab";
 import { readConfig, resolveMappings } from "./config";
+import { writeSnapshot } from "./archive";
+import { MAX_WINDOW_DAYS } from "./simplefin";
 import { detail, formatMilliunits, info, warn } from "./log";
 
 export interface RunOptions extends ReconcileOptions {
@@ -10,6 +12,8 @@ export interface RunOptions extends ReconcileOptions {
     ynabToken: string;
     budgetId: string;
     dryRun?: boolean;
+    /** When set, the full 90-day response is written here before reconciling. */
+    archiveDir?: string;
 }
 
 export interface RunSummary {
@@ -66,12 +70,30 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
     const mappedIds = new Set(mappings.map((m) => m.ynabAccountId));
     const mapped = ynabAccounts.filter((a) => mappedIds.has(a.id));
 
-    info("Fetching SimpleFIN balances...");
-    const accountSet = await getSimpleFinAccounts(options.accessUrl);
+    // Archiving rides on this one request — the Bridge's quota counts requests, not bytes.
+    const archiving = Boolean(options.archiveDir);
+    info(archiving ? `Fetching SimpleFIN balances and ${MAX_WINDOW_DAYS}d of history...` : "Fetching SimpleFIN balances...");
+    const accountSet = await getSimpleFinAccounts(options.accessUrl, {
+        days: archiving ? MAX_WINDOW_DAYS : 0,
+    });
     info(`Fetched ${accountSet.accounts.length} SimpleFIN account(s).`);
 
     for (const err of accountSet.errors) {
         warn(`SimpleFIN: ${err}`);
+    }
+
+    // Written before reconciling: a snapshot is worth keeping even if the YNAB half fails,
+    // and the 90-day window means anything missed today is unrecoverable later.
+    if (options.archiveDir) {
+        try {
+            const snapshot = writeSnapshot(options.archiveDir, accountSet);
+            info(
+                `Archived ${snapshot.accounts} account(s), ${snapshot.transactions} transaction(s), ` +
+                `${snapshot.holdings} holding(s) → ${snapshot.path} (${Math.round(snapshot.bytes / 1024)}KB)`,
+            );
+        } catch (err) {
+            warn(`Archive failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
     }
 
     const plans = reconcile(mapped, accountSet, { ...options, mappings });

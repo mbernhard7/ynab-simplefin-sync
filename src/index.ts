@@ -11,6 +11,8 @@ export type { SimpleFinAccount, SimpleFinAccountSet, SimpleFinError } from "./si
 export { applyPlan, applyPlans, PAYEE_NAME } from "./ynab";
 export type { ApplyResult, ApplyOutcome } from "./ynab";
 export { toMilliunits } from "./money";
+export { writeSnapshot } from "./archive";
+export type { SnapshotResult } from "./archive";
 export { run } from "./run";
 export { link, parseSelection, suggestFor } from "./link";
 export type { LinkOptions } from "./link";

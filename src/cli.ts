@@ -30,6 +30,7 @@ Options (sync):
   --force              Bypass the large-adjustment safety guard
   --stale-hours <n>    Flag balances older than n hours (default 36)
   --threshold <usd>    Absolute floor for the safety guard (default 25000)
+  --archive <dir>      Also save the full 90-day response to <dir> (or ARCHIVE_DIR)
 
 Secrets — environment only, never written to the config:
   YNAB_API_TOKEN         required
@@ -139,6 +140,17 @@ const claim = async (setupToken?: string) => {
     console.log(accessUrl);
 };
 
+const stringFlag = (argv: string[], flag: string): string | undefined => {
+    const index = argv.indexOf(flag);
+    if (index === -1) return undefined;
+
+    const value = argv[index + 1];
+    if (value === undefined || value.startsWith("--")) {
+        throw new Error(`${flag} requires a directory`);
+    }
+    return value;
+};
+
 const sync = async (argv: string[]) => {
     const thresholdUsd = numericFlag(argv, "--threshold");
 
@@ -146,6 +158,7 @@ const sync = async (argv: string[]) => {
         accessUrl: requireEnv("SIMPLEFIN_ACCESS_URL"),
         ynabToken: requireEnv("YNAB_API_TOKEN"),
         budgetId: requireBudgetId(),
+        archiveDir: stringFlag(argv, "--archive") ?? process.env.ARCHIVE_DIR,
         dryRun: argv.includes("--dry-run") || process.env.DRY_RUN === "1",
         force: argv.includes("--force"),
         staleAfterHours: numericFlag(argv, "--stale-hours"),
