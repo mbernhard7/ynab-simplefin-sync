@@ -17,21 +17,41 @@ Yahoo Finance. This one doesn't model positions at all — no memos, no tickers,
 
 ## Mapping accounts
 
-Put the key anywhere in the YNAB account's note:
+The fastest way is the interactive picker:
+
+```bash
+ynab-simplefin-sync link
+```
+
+It lists your YNAB accounts, lets you pick which to map, then for each one shows the SimpleFIN
+accounts (with a suggested match based on the name) and lets you choose. Comma-separate to sum
+several SimpleFIN accounts into one YNAB account — HSA custodians typically expose the cash side
+and the invested side separately. It saves to `~/.config/ynab-simplefin-sync/mappings.json` and
+prints a `SIMPLEFIN_MAP` string for CI.
+
+Mappings are resolved from three places, in this order:
+
+| Source | Where | Precedence |
+|---|---|---|
+| Note | `SIMPLEFIN:ACT-...` in the YNAB account note | highest |
+| Config | `~/.config/ynab-simplefin-sync/mappings.json`, written by `link` | middle |
+| Env | `SIMPLEFIN_MAP="<ynabId>=ACT-1+ACT-2;<ynabId2>=ACT-3"` | lowest |
+
+The note wins because it is the only mapping visible from inside YNAB — letting an invisible
+JSON file silently override what the note says would make a wrong balance very hard to explain.
+`link` warns when a leftover note key is about to shadow what it just saved.
+
+> **`link` cannot write the note for you.** The YNAB API is read-only for accounts — there is no
+> PATCH/PUT endpoint, only `getAccounts`, `getAccountById` and `createAccount`. Notes can only be
+> edited by hand in YNAB. That's why the config file exists; `link` prints the note text too, if
+> you'd rather paste it in.
+
+To map by hand instead, put the key anywhere in the account's note and run `discover` for the ids:
 
 ```
 Roth IRA, opened 2019
 SIMPLEFIN:ACT-8f3c1a02-...
 ```
-
-Use `+` to sum several SimpleFIN accounts into one YNAB account — HSA custodians typically
-expose the cash side and the invested side separately:
-
-```
-SIMPLEFIN:ACT-hsa-cash+ACT-hsa-invest
-```
-
-Run `discover` to list the ids.
 
 ## Setup
 
@@ -53,7 +73,7 @@ export SIMPLEFIN_ACCESS_URL="https://...:...@bridge.simplefin.org/simplefin"
 export YNAB_API_TOKEN="..."
 export YNAB_BUDGET_ID="..."
 
-ynab-simplefin-sync discover      # list SimpleFIN ids + current YNAB mapping
+ynab-simplefin-sync link          # interactively map accounts
 ynab-simplefin-sync sync --dry-run
 ynab-simplefin-sync sync
 ```
@@ -63,10 +83,12 @@ ynab-simplefin-sync sync
 | Command | Purpose |
 |---|---|
 | `sync` (default) | Fetch balances, reconcile, write to YNAB |
+| `link` | Interactively pick YNAB accounts and their SimpleFIN counterparts |
 | `discover` | List SimpleFIN accounts and which YNAB accounts map to them |
 | `claim <token>` | Exchange a single-use Setup Token for an Access URL |
 
-Flags: `--dry-run` (also `DRY_RUN=1`), `--force`, `--stale-hours <n>`, `--threshold <usd>`.
+Flags: `--dry-run` (also `DRY_RUN=1`), `--force`, `--stale-hours <n>`, `--threshold <usd>`,
+`--print-only` (link).
 
 Exit codes: `0` clean, `1` fatal, `2` completed but something needs a human (a failed write,
 a broken connection, or a tripped safety guard).

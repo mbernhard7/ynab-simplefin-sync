@@ -2,7 +2,8 @@
 import { API } from "ynab";
 import { claimSetupToken, getAccounts as getSimpleFinAccounts } from "./simplefin";
 import { getAccounts as getYnabAccounts } from "./ynab";
-import { parseNote } from "./reconcile";
+import { link } from "./link";
+import { readConfig, resolveMappings } from "./mapping";
 import { toMilliunits } from "./money";
 import { detail, error, formatMilliunits, info, warn } from "./log";
 import { run } from "./run";
@@ -11,8 +12,12 @@ const USAGE = `
 ynab-simplefin-sync — reconcile YNAB investment balances against SimpleFIN
 
   sync                 Fetch balances and post one adjustment per account per day (default)
-  discover             List SimpleFIN and YNAB accounts so notes can be mapped
+  link                 Interactively pick YNAB accounts and their SimpleFIN counterparts
+  discover             List SimpleFIN and YNAB accounts so they can be mapped
   claim <setup-token>  Exchange a single-use Setup Token for a permanent Access URL
+
+Options (link):
+  --print-only         Choose mappings and print them without saving
 
 Options (sync):
   --dry-run            Print the plan without writing to YNAB
@@ -23,7 +28,8 @@ Options (sync):
 Environment:
   YNAB_API_TOKEN         required for sync and discover
   YNAB_BUDGET_ID         required for sync and discover
-  SIMPLEFIN_ACCESS_URL   required for sync and discover
+  SIMPLEFIN_ACCESS_URL   required for sync, link and discover
+  SIMPLEFIN_MAP          optional mappings for CI: id=ACT-1+ACT-2;id2=ACT-3
   DRY_RUN=1              same as --dry-run
 `.trim();
 
@@ -74,13 +80,23 @@ const discover = async () => {
 
     const ynabAccounts = await getYnabAccounts(new API(token), budgetId);
     const open = ynabAccounts.filter((a) => !a.deleted && !a.closed);
+    const resolved = new Map(
+        resolveMappings(open, { config: readConfig(), env: process.env.SIMPLEFIN_MAP }).map((m) => [
+            m.ynabAccountId,
+            m,
+        ]),
+    );
 
     info(`YNAB accounts (${open.length} open):`);
     for (const account of open) {
-        const ids = parseNote(account.note);
-        const mapping = ids.length > 0 ? `mapped → ${ids.join(" + ")}` : "unmapped";
-        detail(`${account.name} — ${formatMilliunits(account.balance)} — ${mapping}`);
+        const mapping = resolved.get(account.id);
+        const status = mapping
+            ? `mapped via ${mapping.source} → ${mapping.simplefinIds.join(" + ")}`
+            : "unmapped";
+        detail(`${account.name} — ${formatMilliunits(account.balance)} — ${status}`);
     }
+
+    info("Run `link` to map accounts interactively.");
 };
 
 const claim = async (setupToken?: string) => {
@@ -124,6 +140,14 @@ const main = async () => {
     switch (command) {
         case "sync":
             return sync(argv);
+        case "link":
+            await link({
+                accessUrl: requireEnv("SIMPLEFIN_ACCESS_URL"),
+                ynabToken: requireEnv("YNAB_API_TOKEN"),
+                budgetId: requireEnv("YNAB_BUDGET_ID"),
+                printOnly: argv.includes("--print-only"),
+            });
+            return;
         case "discover":
             return discover();
         case "claim":

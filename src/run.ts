@@ -1,7 +1,8 @@
 import { API } from "ynab";
 import { getAccounts as getSimpleFinAccounts } from "./simplefin";
-import { parseNote, reconcile, type AccountPlan, type ReconcileOptions } from "./reconcile";
+import { reconcile, type AccountPlan, type ReconcileOptions } from "./reconcile";
 import { applyPlans, getAccounts as getYnabAccounts } from "./ynab";
+import { readConfig, resolveMappings } from "./mapping";
 import { detail, formatMilliunits, info, warn } from "./log";
 
 export interface RunOptions extends ReconcileOptions {
@@ -41,13 +42,29 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
 
     info("Fetching YNAB accounts...");
     const ynabAccounts = await getYnabAccounts(api, options.budgetId);
-    const mapped = ynabAccounts.filter((a) => !a.deleted && parseNote(a.note).length > 0);
-    info(`Found ${mapped.length} mapped account(s) out of ${ynabAccounts.length}.`);
 
-    if (mapped.length === 0) {
-        warn("No YNAB account note contains a SIMPLEFIN:<id> key. Run `discover` to list ids.");
+    const mappings =
+        options.mappings ??
+        resolveMappings(ynabAccounts, { config: readConfig(), env: process.env.SIMPLEFIN_MAP });
+
+    const bySource = mappings.reduce<Record<string, number>>((acc, m) => {
+        const source = "source" in m ? String(m.source) : "note";
+        acc[source] = (acc[source] ?? 0) + 1;
+        return acc;
+    }, {});
+
+    info(
+        `Found ${mappings.length} mapped account(s) out of ${ynabAccounts.length}` +
+        `${Object.keys(bySource).length > 0 ? ` (${Object.entries(bySource).map(([k, v]) => `${v} via ${k}`).join(", ")})` : ""}.`,
+    );
+
+    if (mappings.length === 0) {
+        warn("No accounts are mapped. Run `link` to pick them interactively, or `discover` to list ids.");
         return { plans: [], applied: 0, failed: 0, blocked: 0 };
     }
+
+    const mappedIds = new Set(mappings.map((m) => m.ynabAccountId));
+    const mapped = ynabAccounts.filter((a) => mappedIds.has(a.id));
 
     info("Fetching SimpleFIN balances...");
     const accountSet = await getSimpleFinAccounts(options.accessUrl);
@@ -57,7 +74,7 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
         warn(`SimpleFIN: ${err}`);
     }
 
-    const plans = reconcile(mapped, accountSet, options);
+    const plans = reconcile(mapped, accountSet, { ...options, mappings });
 
     info("Plan:");
     for (const plan of plans) {

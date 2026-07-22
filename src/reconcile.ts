@@ -43,6 +43,11 @@ export interface AccountPlan {
 }
 
 export interface ReconcileOptions {
+    /**
+     * Pre-resolved account mappings. When omitted, mappings are read from YNAB account notes.
+     * `resolveMappings` in ./mapping layers notes over the config file and SIMPLEFIN_MAP.
+     */
+    mappings?: { ynabAccountId: string; simplefinIds: string[] }[];
     now?: Date;
     /** Flag a balance as stale past this age. Stale balances are still reconciled. */
     staleAfterHours?: number;
@@ -105,12 +110,15 @@ export const reconcile = (
     const date = localDate(now);
 
     const byId = new Map(accountSet.accounts.map((a) => [a.id, a]));
+    const mapped = options.mappings
+        ? new Map(options.mappings.map((m) => [m.ynabAccountId, m.simplefinIds]))
+        : undefined;
     const plans: AccountPlan[] = [];
 
     for (const ynabAccount of ynabAccounts) {
         if (ynabAccount.deleted) continue;
 
-        const simplefinIds = parseNote(ynabAccount.note);
+        const simplefinIds = mapped ? mapped.get(ynabAccount.id) ?? [] : parseNote(ynabAccount.note);
         if (simplefinIds.length === 0) continue;
 
         const base = {

@@ -12,3 +12,15 @@ export { applyPlan, applyPlans, PAYEE_NAME } from "./ynab";
 export type { ApplyResult, ApplyOutcome } from "./ynab";
 export { toMilliunits } from "./money";
 export { run } from "./run";
+export { link, parseSelection, suggestFor } from "./link";
+export type { LinkOptions } from "./link";
+export {
+    configPath,
+    readConfig,
+    writeConfig,
+    parseEnvMap,
+    formatEnvMap,
+    resolveMappings,
+    shadowedByNote,
+} from "./mapping";
+export type { AccountMapping, MappingFile, MappingSource } from "./mapping";
