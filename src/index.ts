@@ -15,12 +15,18 @@ export { run } from "./run";
 export { link, parseSelection, suggestFor } from "./link";
 export type { LinkOptions } from "./link";
 export {
+    configDir,
     configPath,
+    emptyConfig,
     readConfig,
     writeConfig,
     parseEnvMap,
     formatEnvMap,
+    resolveBudgetId,
     resolveMappings,
     shadowedByNote,
-} from "./mapping";
-export type { AccountMapping, MappingFile, MappingSource } from "./mapping";
+} from "./config";
+export type { AccountMapping, Config, MappingSource } from "./config";
+export { loadEnv, parseEnvFile, envFileCandidates, configEnvPath, shellQuote } from "./env";
+export { setup, upsertEnvFile } from "./setup";
+export type { SetupOptions } from "./setup";

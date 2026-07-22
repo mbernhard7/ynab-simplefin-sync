@@ -2,7 +2,7 @@ import { API } from "ynab";
 import { getAccounts as getSimpleFinAccounts } from "./simplefin";
 import { reconcile, type AccountPlan, type ReconcileOptions } from "./reconcile";
 import { applyPlans, getAccounts as getYnabAccounts } from "./ynab";
-import { readConfig, resolveMappings } from "./mapping";
+import { readConfig, resolveMappings } from "./config";
 import { detail, formatMilliunits, info, warn } from "./log";
 
 export interface RunOptions extends ReconcileOptions {

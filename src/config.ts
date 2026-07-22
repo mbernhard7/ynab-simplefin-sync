@@ -5,7 +5,7 @@ import { parseNote, type YnabAccountLike } from "./reconcile";
 
 /**
  * Where a mapping came from. YNAB's API is read-only for accounts (no PATCH endpoint),
- * so `link` cannot write notes — it writes `config`, and `note` stays available for anyone
+ * so `link` cannot write notes — it writes the config, and `note` stays available for anyone
  * who prefers editing YNAB directly.
  */
 export type MappingSource = "note" | "config" | "env";
@@ -16,38 +16,41 @@ export interface AccountMapping {
     source: MappingSource;
 }
 
-export interface MappingFile {
+/**
+ * Structural settings only. Secrets (YNAB_API_TOKEN, SIMPLEFIN_ACCESS_URL) deliberately never
+ * land here — they belong in the environment or the sibling `.env`, which is written 0600.
+ */
+export interface Config {
     version: 1;
+    budgetId?: string;
     mappings: Record<string, { name?: string; simplefinIds: string[] }>;
 }
 
-export const configPath = (): string =>
-    join(
-        process.env.XDG_CONFIG_HOME || join(homedir(), ".config"),
-        "ynab-simplefin-sync",
-        "mappings.json",
-    );
+export const configDir = (): string =>
+    join(process.env.XDG_CONFIG_HOME || join(homedir(), ".config"), "ynab-simplefin-sync");
 
-export const readConfig = (path = configPath()): MappingFile => {
-    if (!existsSync(path)) return { version: 1, mappings: {} };
+export const configPath = (): string => join(configDir(), "config.json");
 
-    let parsed: unknown;
-    try {
-        parsed = JSON.parse(readFileSync(path, "utf8"));
-    } catch (err) {
-        throw new Error(`Mapping file at ${path} is not valid JSON: ${(err as Error).message}`);
-    }
+/** Pre-2.1 name, when the file only held mappings. Read once so upgrades don't lose data. */
+const legacyConfigPath = (): string => join(configDir(), "mappings.json");
 
+export const emptyConfig = (): Config => ({ version: 1, mappings: {} });
+
+const parseConfig = (parsed: unknown, path: string): Config => {
     if (typeof parsed !== "object" || parsed === null) {
-        throw new Error(`Mapping file at ${path} is not an object.`);
+        throw new Error(`Config at ${path} is not an object.`);
     }
+
+    const config = emptyConfig();
+
+    const budgetId = (parsed as { budgetId?: unknown }).budgetId;
+    if (typeof budgetId === "string" && budgetId.length > 0) config.budgetId = budgetId;
 
     const raw = (parsed as { mappings?: unknown }).mappings;
-    const mappings: MappingFile["mappings"] = {};
-
     if (typeof raw === "object" && raw !== null) {
         for (const [ynabId, entry] of Object.entries(raw as Record<string, unknown>)) {
             if (typeof entry !== "object" || entry === null) continue;
+
             const ids = (entry as { simplefinIds?: unknown }).simplefinIds;
             if (!Array.isArray(ids)) continue;
 
@@ -55,21 +58,44 @@ export const readConfig = (path = configPath()): MappingFile => {
             if (simplefinIds.length === 0) continue;
 
             const name = (entry as { name?: unknown }).name;
-            mappings[ynabId] = { simplefinIds, ...(typeof name === "string" ? { name } : {}) };
+            config.mappings[ynabId] = {
+                simplefinIds,
+                ...(typeof name === "string" ? { name } : {}),
+            };
         }
     }
 
-    return { version: 1, mappings };
+    return config;
 };
 
-export const writeConfig = (config: MappingFile, path = configPath()): void => {
+export const readConfig = (path = configPath()): Config => {
+    // The legacy fallback applies only to the default location. Honoring it for an explicit
+    // path would mean a caller asking for a file that doesn't exist silently gets the user's
+    // real config instead of an empty one.
+    const target =
+        existsSync(path) || path !== configPath() ? path : legacyConfigPath();
+
+    if (!existsSync(target)) return emptyConfig();
+
+    let parsed: unknown;
+    try {
+        parsed = JSON.parse(readFileSync(target, "utf8"));
+    } catch (err) {
+        throw new Error(`Config at ${target} is not valid JSON: ${(err as Error).message}`);
+    }
+
+    return parseConfig(parsed, target);
+};
+
+export const writeConfig = (config: Config, path = configPath()): void => {
     mkdirSync(dirname(path), { recursive: true });
+    // Names the user's accounts; no reason for it to be world-readable.
     writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
 };
 
 /**
- * `SIMPLEFIN_MAP` carries the same data as the config file for environments that have no
- * writable home directory — chiefly GitHub Actions.
+ * `SIMPLEFIN_MAP` carries the same mappings as the config for environments with no writable
+ * home directory — chiefly GitHub Actions.
  * Format: `<ynabAccountId>=ACT-1+ACT-2;<ynabAccountId>=ACT-3`
  */
 export const parseEnvMap = (value?: string | null): Record<string, string[]> => {
@@ -105,15 +131,19 @@ export const parseEnvMap = (value?: string | null): Record<string, string[]> => 
 export const formatEnvMap = (mappings: AccountMapping[]): string =>
     mappings.map((m) => `${m.ynabAccountId}=${m.simplefinIds.join("+")}`).join(";");
 
+/** Environment wins, so CI and one-off overrides never need the config file touched. */
+export const resolveBudgetId = (config: Config = readConfig()): string | undefined =>
+    process.env.YNAB_BUDGET_ID || config.budgetId;
+
 export interface ResolveSources {
-    config?: MappingFile;
+    config?: Config;
     env?: string | null;
 }
 
 /**
  * The note wins when both are present. It is the only mapping visible from inside YNAB, so
- * letting an invisible JSON file silently override it would make a wrong balance very hard
- * to explain. `link` warns when it is about to be shadowed this way.
+ * letting an invisible config silently override it would make a wrong balance very hard to
+ * explain. `link` warns when it is about to be shadowed this way.
  */
 export const resolveMappings = (
     ynabAccounts: YnabAccountLike[],
@@ -148,10 +178,7 @@ export const resolveMappings = (
 };
 
 /** Accounts whose config mapping is being overridden by a note — worth telling the user about. */
-export const shadowedByNote = (
-    ynabAccounts: YnabAccountLike[],
-    config: MappingFile,
-): YnabAccountLike[] =>
+export const shadowedByNote = (ynabAccounts: YnabAccountLike[], config: Config): YnabAccountLike[] =>
     ynabAccounts.filter(
         (a) => !a.deleted && parseNote(a.note).length > 0 && config.mappings[a.id] !== undefined,
     );

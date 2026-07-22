@@ -3,7 +3,8 @@ import assert from "node:assert/strict";
 import { mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadEnv, parseEnvFile } from "../src/env";
+import { execFileSync } from "node:child_process";
+import { loadEnv, parseEnvFile, shellQuote } from "../src/env";
 
 test("parseEnvFile handles the shapes people actually write", () => {
     const parsed = parseEnvFile(
@@ -57,6 +58,26 @@ test("loadEnv never overrides a real environment variable", () => {
     } finally {
         delete process.env.YSS_TEST_PRESET;
         delete process.env.YSS_TEST_FRESH;
+    }
+});
+
+test("shellQuote survives a real shell round-trip", () => {
+    // The printed `export SIMPLEFIN_MAP=...` has to paste cleanly; the value contains ';'
+    // and '=', which an unquoted shell would split on.
+    const values = [
+        "a=ACT-1+ACT-2;b=ACT-3",
+        "has 'single' quotes",
+        "semi;colon && rm -rf /",
+        "$HOME `whoami` $(id)",
+        'double "quotes"',
+        "",
+    ];
+
+    for (const value of values) {
+        const echoed = execFileSync("sh", ["-c", `printf %s ${shellQuote(value)}`], {
+            encoding: "utf8",
+        });
+        assert.equal(echoed, value, `round-trip failed for: ${value}`);
     }
 });
 

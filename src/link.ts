@@ -11,8 +11,9 @@ import {
     resolveMappings,
     writeConfig,
     type AccountMapping,
-    type MappingFile,
-} from "./mapping";
+    type Config,
+} from "./config";
+import { configEnvPath, shellQuote } from "./env";
 import { detail, formatMilliunits, info, warn } from "./log";
 import { toMilliunits } from "./money";
 
@@ -211,7 +212,7 @@ export const link = async (options: LinkOptions): Promise<AccountMapping[]> => {
         }
 
         if (!options.printOnly) {
-            const updated: MappingFile = { version: 1, mappings: { ...config.mappings } };
+            const updated: Config = { version: 1, mappings: { ...config.mappings } };
             for (const mapping of chosen) {
                 updated.mappings[mapping.ynabAccountId] = {
                     name: nameById.get(mapping.ynabAccountId),
@@ -237,14 +238,29 @@ export const link = async (options: LinkOptions): Promise<AccountMapping[]> => {
             env: process.env.SIMPLEFIN_MAP,
         });
 
-        console.log("");
-        info("For CI, set this as the SIMPLEFIN_MAP repository secret or variable:");
-        console.log(formatEnvMap(all));
+        const envValue = formatEnvMap(all);
+        const envPath = configEnvPath();
 
         console.log("");
-        info("Or paste these into the YNAB account notes instead (notes take precedence):");
+        info("These mappings are picked up automatically on this machine. To use them");
+        info("somewhere else — CI, another shell, or without the config file — pick one:");
+
+        console.log("");
+        detail("This shell only:");
+        console.log(`  export SIMPLEFIN_MAP=${shellQuote(envValue)}`);
+
+        console.log("");
+        detail("Every shell, from now on:");
+        console.log(`  echo ${shellQuote(`SIMPLEFIN_MAP=${envValue}`)} >> ${shellQuote(envPath)}`);
+
+        console.log("");
+        detail("GitHub Actions:");
+        console.log(`  gh secret set SIMPLEFIN_MAP --body ${shellQuote(envValue)}`);
+
+        console.log("");
+        detail("Or paste into the YNAB account notes instead (notes take precedence):");
         for (const mapping of chosen) {
-            detail(`${nameById.get(mapping.ynabAccountId)}: SIMPLEFIN:${mapping.simplefinIds.join("+")}`);
+            detail(`  ${nameById.get(mapping.ynabAccountId)}: SIMPLEFIN:${mapping.simplefinIds.join("+")}`);
         }
 
         return chosen;

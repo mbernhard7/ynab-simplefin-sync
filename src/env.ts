@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
-import { configPath } from "./mapping";
+import { configPath } from "./config";
 
 /**
  * Minimal `.env` parser — enough for `KEY=value`, `export KEY=value`, quoted values and
@@ -37,11 +37,20 @@ export const parseEnvFile = (contents: string): Record<string, string> => {
     return result;
 };
 
+/** The `.env` that sits alongside the mapping config — the one meant to persist credentials. */
+export const configEnvPath = (): string => join(dirname(configPath()), ".env");
+
 /** `.env` in the current directory, then one alongside the mapping config. */
 export const envFileCandidates = (cwd = process.cwd()): string[] => [
     join(cwd, ".env"),
-    join(dirname(configPath()), ".env"),
+    configEnvPath(),
 ];
+
+/**
+ * Wraps a value in single quotes for copy-pasteable shell commands. Mapping values contain
+ * `;` and `=`, which an unquoted shell would split on or misread.
+ */
+export const shellQuote = (value: string): string => `'${value.split("'").join(`'\\''`)}'`;
 
 /**
  * Loads `.env` files into process.env. A variable already present in the real environment

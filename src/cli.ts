@@ -3,7 +3,8 @@ import { API } from "ynab";
 import { claimSetupToken, getAccounts as getSimpleFinAccounts } from "./simplefin";
 import { getAccounts as getYnabAccounts } from "./ynab";
 import { link } from "./link";
-import { readConfig, resolveMappings } from "./mapping";
+import { setup } from "./setup";
+import { configPath, readConfig, resolveBudgetId, resolveMappings } from "./config";
 import { toMilliunits } from "./money";
 import { detail, error, formatMilliunits, info, warn } from "./log";
 import { loadEnv } from "./env";
@@ -12,10 +13,14 @@ import { run } from "./run";
 const USAGE = `
 ynab-simplefin-sync — reconcile YNAB investment balances against SimpleFIN
 
+  setup                Guided first-run: credentials, budget, then account mapping
   sync                 Fetch balances and post one adjustment per account per day (default)
   link                 Interactively pick YNAB accounts and their SimpleFIN counterparts
   discover             List SimpleFIN and YNAB accounts so they can be mapped
   claim <setup-token>  Exchange a single-use Setup Token for a permanent Access URL
+
+Options (setup):
+  --skip-link          Stop after credentials and budget
 
 Options (link):
   --print-only         Choose mappings and print them without saving
@@ -26,21 +31,42 @@ Options (sync):
   --stale-hours <n>    Flag balances older than n hours (default 36)
   --threshold <usd>    Absolute floor for the safety guard (default 25000)
 
-Environment:
-  YNAB_API_TOKEN         required for sync, link and discover
-  YNAB_BUDGET_ID         required for sync, link and discover
-  SIMPLEFIN_ACCESS_URL   required for sync, link and discover
-  SIMPLEFIN_MAP          optional mappings for CI: id=ACT-1+ACT-2;id2=ACT-3
+Secrets — environment only, never written to the config:
+  YNAB_API_TOKEN         required
+  SIMPLEFIN_ACCESS_URL   required
+
+Settings — config file, overridable by environment:
+  YNAB_BUDGET_ID         else "budgetId" in the config
+  SIMPLEFIN_MAP          else "mappings" in the config (id=ACT-1+ACT-2;id2=ACT-3)
+
+Other:
   DRY_RUN=1              same as --dry-run
 
-Read from ./.env and ~/.config/ynab-simplefin-sync/.env when present.
+Secrets are read from ./.env and ~/.config/ynab-simplefin-sync/.env when present.
 Real environment variables always win over both.
 `.trim();
 
 const requireEnv = (name: string): string => {
     const value = process.env[name];
-    if (!value) throw new Error(`Missing required environment variable: ${name}`);
+    if (!value) {
+        throw new Error(
+            `Missing required credential: ${name}. Run \`ynab-simplefin-sync setup\`, ` +
+            `or export it yourself.`,
+        );
+    }
     return value;
+};
+
+/** Environment first, then the config file written by `setup`. */
+const requireBudgetId = (): string => {
+    const budgetId = resolveBudgetId();
+    if (!budgetId) {
+        throw new Error(
+            `No budget configured. Run \`ynab-simplefin-sync setup\`, set YNAB_BUDGET_ID, ` +
+            `or add "budgetId" to ${configPath()}.`,
+        );
+    }
+    return budgetId;
 };
 
 const numericFlag = (argv: string[], flag: string): number | undefined => {
@@ -58,7 +84,7 @@ const numericFlag = (argv: string[], flag: string): number | undefined => {
 const discover = async () => {
     const accessUrl = requireEnv("SIMPLEFIN_ACCESS_URL");
     const token = requireEnv("YNAB_API_TOKEN");
-    const budgetId = requireEnv("YNAB_BUDGET_ID");
+    const budgetId = requireBudgetId();
 
     const accountSet = await getSimpleFinAccounts(accessUrl);
 
@@ -119,7 +145,7 @@ const sync = async (argv: string[]) => {
     const summary = await run({
         accessUrl: requireEnv("SIMPLEFIN_ACCESS_URL"),
         ynabToken: requireEnv("YNAB_API_TOKEN"),
-        budgetId: requireEnv("YNAB_BUDGET_ID"),
+        budgetId: requireBudgetId(),
         dryRun: argv.includes("--dry-run") || process.env.DRY_RUN === "1",
         force: argv.includes("--force"),
         staleAfterHours: numericFlag(argv, "--stale-hours"),
@@ -144,13 +170,15 @@ const main = async () => {
     for (const path of loadEnv()) detail(`Loaded environment from ${path}`);
 
     switch (command) {
+        case "setup":
+            return setup({ skipLink: argv.includes("--skip-link") });
         case "sync":
             return sync(argv);
         case "link":
             await link({
                 accessUrl: requireEnv("SIMPLEFIN_ACCESS_URL"),
                 ynabToken: requireEnv("YNAB_API_TOKEN"),
-                budgetId: requireEnv("YNAB_BUDGET_ID"),
+                budgetId: requireBudgetId(),
                 printOnly: argv.includes("--print-only"),
             });
             return;

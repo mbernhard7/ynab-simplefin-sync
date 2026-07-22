@@ -54,43 +54,49 @@ Requires Node 20+.
 
 ## Setup
 
-### 1. Claim a SimpleFIN Access URL
-
-Generate a Setup Token on the SimpleFIN Bridge, then exchange it. **Setup Tokens are
-single-use** — if this fails, generate a fresh one.
-
 ```bash
-ynab-simplefin-sync claim <setup-token>
+ynab-simplefin-sync setup
 ```
 
-### 2. Save your credentials
-
-Put them in `~/.config/ynab-simplefin-sync/.env` so you never have to export them again:
-
-```bash
-SIMPLEFIN_ACCESS_URL=https://user:pass@bridge.simplefin.org/simplefin
-YNAB_API_TOKEN=...
-YNAB_BUDGET_ID=...
-```
-
-`chmod 600` it — the Access URL contains Basic Auth credentials. It is never logged unredacted.
-
-Your YNAB token comes from **Settings → Developer Settings → New Access Token**; the budget id
-is the uuid in the YNAB app URL.
-
-A `.env` in the current directory is read too. Real environment variables always win over
-both, so CI secrets can never be shadowed by a file that got committed by accident.
-
-### 3. Map your accounts
-
-```bash
-ynab-simplefin-sync link
-```
-
-### 4. Check the plan before writing anything
+One guided pass: paste your SimpleFIN Setup Token (it claims the Access URL for you) and your
+YNAB token, pick your budget from a list, then map your accounts. When it finishes you are ready
+for:
 
 ```bash
 ynab-simplefin-sync sync --dry-run
+```
+
+Tokens are typed without echoing, and re-running `setup` offers to keep whatever is already
+configured rather than making you paste it again. Pass `--skip-link` to stop after credentials.
+
+The first real run will post a large catch-up adjustment covering the drift accumulated under
+whatever you were doing before. Expect it to trip the safety guard — read the numbers, confirm
+they match what the institution shows, then apply once with `--force`. After that, daily deltas
+are small and run unforced.
+
+### Where things are stored
+
+Secrets and settings are kept apart on purpose. Nothing secret is ever written to the config.
+
+| | Holds | Lives in |
+|---|---|---|
+| **Secrets** | `YNAB_API_TOKEN`, `SIMPLEFIN_ACCESS_URL` | Environment, or `~/.config/ynab-simplefin-sync/.env` (mode 600) |
+| **Settings** | budget id, account mappings | `~/.config/ynab-simplefin-sync/config.json` |
+
+Both settings have an environment override — `YNAB_BUDGET_ID` and `SIMPLEFIN_MAP` — which is how
+CI works, since it has no writable config directory. **Environment always wins**, for secrets
+and settings alike, so a `.env` that gets committed by accident can never shadow a real secret.
+
+A `.env` in the current directory is read as well, before the one in the config directory.
+
+### Doing it by hand instead
+
+```bash
+ynab-simplefin-sync claim <setup-token>   # Setup Tokens are single-use
+export SIMPLEFIN_ACCESS_URL='https://user:pass@bridge.simplefin.org/simplefin'
+export YNAB_API_TOKEN='...'               # YNAB → Settings → Developer Settings
+export YNAB_BUDGET_ID='...'               # the uuid in the YNAB app URL
+ynab-simplefin-sync link
 ```
 
 The first real run will post a large catch-up adjustment covering the drift accumulated under
@@ -110,7 +116,7 @@ Mappings resolve from three places:
 | Source | Where | Precedence |
 |---|---|---|
 | Note | `SIMPLEFIN:ACT-...` in the YNAB account note | highest |
-| Config | `~/.config/ynab-simplefin-sync/mappings.json`, written by `link` | middle |
+| Config | `mappings` in `~/.config/ynab-simplefin-sync/config.json`, written by `link` | middle |
 | Env | `SIMPLEFIN_MAP="<ynabId>=ACT-1+ACT-2;<ynabId2>=ACT-3"` | lowest |
 
 The note wins because it is the only mapping visible from inside YNAB — letting an invisible
@@ -134,6 +140,7 @@ SIMPLEFIN:ACT-8f3c1a02-...
 
 | Command | Purpose |
 |---|---|
+| `setup` | Guided first run: credentials, budget, then mapping |
 | `sync` (default) | Fetch balances, reconcile, write to YNAB |
 | `link` | Interactively pick YNAB accounts and their SimpleFIN counterparts |
 | `discover` | List SimpleFIN accounts and which YNAB accounts map to them |
@@ -145,6 +152,7 @@ SIMPLEFIN:ACT-8f3c1a02-...
 | `--force` | `sync` | Bypass the large-adjustment guard |
 | `--stale-hours <n>` | `sync` | Staleness threshold, default 36 |
 | `--threshold <usd>` | `sync` | Absolute floor for the guard, default 25000 |
+| `--skip-link` | `setup` | Stop after credentials and budget |
 | `--print-only` | `link` | Choose mappings and print them without saving |
 
 Exit codes: `0` clean, `1` fatal, `2` completed but something needs a human — a failed write, a
@@ -222,11 +230,12 @@ the predecessor had no tests, which is much of why it drifted.
 | Module | Responsibility |
 |---|---|
 | `reconcile.ts` | Pure `(accounts, balances) → Plan[]`. All the logic. |
-| `mapping.ts` | Note / config / env resolution |
+| `config.ts` | Config file, note / config / env resolution |
+| `setup.ts` | Guided first run |
 | `link.ts` | Interactive picker |
 | `simplefin.ts` | Claim + `/accounts`, response validation |
 | `ynab.ts` | Account fetch, adjustment upsert |
-| `env.ts` | `.env` loading |
+| `env.ts` | `.env` loading, shell quoting |
 
 ## Releasing
 

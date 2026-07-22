@@ -1,17 +1,18 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, statSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
     formatEnvMap,
     parseEnvMap,
     readConfig,
+    resolveBudgetId,
     resolveMappings,
     shadowedByNote,
     writeConfig,
-    type MappingFile,
-} from "../src/mapping";
+    type Config,
+} from "../src/config";
 import { parseSelection, suggestFor } from "../src/link";
 import type { YnabAccountLike } from "../src/reconcile";
 import type { SimpleFinAccount } from "../src/simplefin";
@@ -22,7 +23,7 @@ const ynab = (over: Partial<YnabAccountLike> & { id: string }): YnabAccountLike 
     ...over,
 });
 
-const config = (mappings: MappingFile["mappings"]): MappingFile => ({ version: 1, mappings });
+const config = (mappings: Config["mappings"]): Config => ({ version: 1, mappings });
 
 test("parseEnvMap reads the CI mapping format", () => {
     assert.deepEqual(parseEnvMap("a=ACT-1"), { a: ["ACT-1"] });
@@ -99,9 +100,38 @@ test("config round-trips to disk and is written owner-only", () => {
     assert.equal(statSync(path).mode & 0o077, 0);
 });
 
+test("budgetId round-trips and the environment overrides it", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "yss-")), "config.json");
+    writeConfig({ version: 1, budgetId: "budget-from-config", mappings: {} }, path);
+
+    const loaded = readConfig(path);
+    assert.equal(loaded.budgetId, "budget-from-config");
+
+    delete process.env.YNAB_BUDGET_ID;
+    assert.equal(resolveBudgetId(loaded), "budget-from-config");
+
+    try {
+        process.env.YNAB_BUDGET_ID = "budget-from-env";
+        assert.equal(resolveBudgetId(loaded), "budget-from-env");
+    } finally {
+        delete process.env.YNAB_BUDGET_ID;
+    }
+
+    assert.equal(resolveBudgetId({ version: 1, mappings: {} }), undefined);
+});
+
+test("secrets never reach the config file", () => {
+    const path = join(mkdtempSync(join(tmpdir(), "yss-")), "config.json");
+    writeConfig({ version: 1, budgetId: "b", mappings: { a: { simplefinIds: ["ACT-1"] } } }, path);
+
+    assert.doesNotMatch(readFileSync(path, "utf8"), /TOKEN|ACCESS_URL|password|bridge\.simplefin/i);
+});
+
 test("a missing config file reads as empty, malformed entries are dropped", () => {
     const dir = mkdtempSync(join(tmpdir(), "yss-"));
 
+    // An explicit path must never fall through to the real config in the user's home
+    // directory — the legacy-filename fallback applies only to the default location.
     assert.deepEqual(readConfig(join(dir, "absent.json")), { version: 1, mappings: {} });
 
     const junk = join(dir, "junk.json");
