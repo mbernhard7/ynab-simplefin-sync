@@ -1,0 +1,92 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+    inputs:
+      level:
+        description: "Version bump to apply"
+        type: choice
+        options: [patch, minor, major]
+        default: patch
+
+# Two pushes in quick succession would otherwise race on the version number.
+concurrency:
+  group: release
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+  id-token: write
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    # The bump commit this workflow pushes is tagged [skip ci] so it cannot retrigger
+    # the workflow. GitHub honors that natively; this guard is belt-and-braces.
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          registry-url: https://registry.npmjs.org
+
+      - run: npm ci
+
+      # Runs before the version bump so a failing test never produces a tag.
+      - run: npm test
+
+      - name: Check for publish credentials
+        id: creds
+        env:
+          NPM_TOKEN: ${{ secrets.NPM_TOKEN }}
+        run: |
+          if [ -n "$NPM_TOKEN" ]; then
+            echo "present=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "present=false" >> "$GITHUB_OUTPUT"
+            echo "::notice::NPM_TOKEN is not set — tests ran, publish skipped."
+          fi
+
+      - name: Decide bump level
+        if: steps.creds.outputs.present == 'true'
+        id: bump
+        run: |
+          if [ -n "${{ inputs.level }}" ]; then
+            echo "level=${{ inputs.level }}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          MSG="$(git log -1 --pretty=%B)"
+          if printf '%s' "$MSG" | grep -qE '(^|\n)BREAKING[ -]CHANGE|^[a-z]+(\([^)]*\))?!:'; then
+            echo "level=major" >> "$GITHUB_OUTPUT"
+          elif printf '%s' "$MSG" | grep -qE '^feat(\([^)]*\))?:'; then
+            echo "level=minor" >> "$GITHUB_OUTPUT"
+          else
+            echo "level=patch" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Bump version
+        if: steps.creds.outputs.present == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          npm version ${{ steps.bump.outputs.level }} -m "release: v%s [skip ci]"
+
+      # prepublishOnly rebuilds and re-runs the suite, so the tarball can only ship green.
+      - name: Publish to npm
+        if: steps.creds.outputs.present == 'true'
+        run: npm publish --provenance --access public
+        env:
+          NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}
+
+      # Last on purpose: if publish fails, nothing lands on main and the next run
+      # retries cleanly from the same version.
+      - name: Push bump and tag
+        if: steps.creds.outputs.present == 'true'
+        run: git push --follow-tags origin HEAD:main

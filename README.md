@@ -119,6 +119,24 @@ npm test        # builds, then runs node:test over the pure reconcile core
 `src/reconcile.ts` is deliberately I/O-free — all the decision logic lives there and is tested
 against fixtures, with `simplefin.ts` and `ynab.ts` reduced to transport.
 
+## Releasing
+
+Every push to `main` runs the tests, bumps the version, and publishes to npm automatically.
+The bump level is read from the commit message:
+
+| Commit message | Bump |
+|---|---|
+| `feat: ...` | minor |
+| `feat!: ...` or a `BREAKING CHANGE` line | major |
+| anything else | patch |
+
+The bump commit is `release: vX.Y.Z [skip ci]`, which is what stops it retriggering the
+workflow. Use `[skip ci]` in your own commit message to push without releasing, or run the
+workflow manually from the Actions tab to force a specific level.
+
+Requires an `NPM_TOKEN` repository secret (an npm **automation** token). Without it the
+workflow still runs the tests and just skips the publish.
+
 ## License
 
 MIT

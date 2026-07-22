@@ -1,8 +1,8 @@
 name: CI
 
+# Pushes to main are handled by release.yml, which runs the same tests before
+# publishing. Keeping this on PRs only avoids testing every commit twice.
 on:
-  push:
-    branches: [main]
   pull_request:
 
 jobs:
