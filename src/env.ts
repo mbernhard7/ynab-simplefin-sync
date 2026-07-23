@@ -2,10 +2,7 @@ import { existsSync, readFileSync } from "node:fs";
 import { join, dirname } from "node:path";
 import { configPath } from "./config";
 
-/**
- * Minimal `.env` parser — enough for `KEY=value`, `export KEY=value`, quoted values and
- * comments. Deliberately not a dotenv dependency; this is the whole feature.
- */
+/** Minimal `.env` parser: `KEY=value`, `export KEY=value`, quoted values, and comments. */
 export const parseEnvFile = (contents: string): Record<string, string> => {
     const result: Record<string, string> = {};
 
@@ -26,7 +23,7 @@ export const parseEnvFile = (contents: string): Record<string, string> => {
         if ((quote === '"' || quote === "'") && value.endsWith(quote) && value.length >= 2) {
             value = value.slice(1, -1);
         } else {
-            // Only strip trailing comments from unquoted values, so a `#` inside a URL survives.
+            // Strip trailing comments only, so a `#` inside a URL survives.
             const comment = value.indexOf(" #");
             if (comment !== -1) value = value.slice(0, comment).trim();
         }
@@ -37,7 +34,7 @@ export const parseEnvFile = (contents: string): Record<string, string> => {
     return result;
 };
 
-/** The `.env` that sits alongside the mapping config — the one meant to persist credentials. */
+/** The `.env` alongside the config file. */
 export const configEnvPath = (): string => join(dirname(configPath()), ".env");
 
 /** `.env` in the current directory, then one alongside the mapping config. */
@@ -46,17 +43,10 @@ export const envFileCandidates = (cwd = process.cwd()): string[] => [
     configEnvPath(),
 ];
 
-/**
- * Wraps a value in single quotes for copy-pasteable shell commands. Mapping values contain
- * `;` and `=`, which an unquoted shell would split on or misread.
- */
+/** Single-quotes a value for copy-pasteable shell commands. */
 export const shellQuote = (value: string): string => `'${value.split("'").join(`'\\''`)}'`;
 
-/**
- * Loads `.env` files into process.env. A variable already present in the real environment
- * always wins, so CI secrets are never shadowed by a file that happened to get committed.
- * Returns the paths actually read.
- */
+/** Loads `.env` files into process.env without overriding existing variables. Returns paths read. */
 export const loadEnv = (candidates = envFileCandidates()): string[] => {
     const loaded: string[] = [];
 

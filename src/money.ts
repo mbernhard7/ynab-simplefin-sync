@@ -1,8 +1,4 @@
-/**
- * SimpleFIN reports balances as *numeric strings* ("1234.56", "-0.7"). Parsing those
- * through a float and multiplying by 1000 introduces representation error at exactly the
- * magnitudes we care about, so convert digit-by-digit instead.
- */
+/** Converts a decimal amount string ("1234.56", "-0.7") to milliunits digit-by-digit. */
 export const toMilliunits = (value: string | number): number => {
     const raw = typeof value === "number" ? value.toString() : value.trim();
 
@@ -19,7 +15,6 @@ export const toMilliunits = (value: string | number): number => {
 
     let total = whole * 1000 + milli;
 
-    // Round on the 4th decimal place rather than truncating.
     const remainder = fracPart.slice(3);
     if (remainder && Number(remainder[0]) >= 5) {
         total += 1;

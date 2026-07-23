@@ -3,11 +3,6 @@ import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseNote, type YnabAccountLike } from "./reconcile";
 
-/**
- * Where a mapping came from. YNAB's API is read-only for accounts (no PATCH endpoint),
- * so `link` cannot write notes — it writes the config, and `note` stays available for anyone
- * who prefers editing YNAB directly.
- */
 export type MappingSource = "note" | "config" | "env";
 
 export interface AccountMapping {
@@ -16,19 +11,11 @@ export interface AccountMapping {
     source: MappingSource;
 }
 
-/**
- * Structural settings only. Secrets (YNAB_API_TOKEN, SIMPLEFIN_ACCESS_URL) deliberately never
- * land here — they belong in the environment or the sibling `.env`, which is written 0600.
- */
 export interface Config {
     version: 1;
     budgetId?: string;
     mappings: Record<string, { name?: string; simplefinIds: string[] }>;
-    /**
-     * SimpleFIN account ids to archive. Absent means archive everything, which is the safe
-     * default: SimpleFIN serves a rolling 90-day window, so anything filtered out today is
-     * gone for good.
-     */
+    /** SimpleFIN account ids to archive. Absent means archive nothing. */
     archiveAccounts?: string[];
 }
 
@@ -37,7 +24,6 @@ export const configDir = (): string =>
 
 export const configPath = (): string => join(configDir(), "config.json");
 
-/** Pre-2.1 name, when the file only held mappings. Read once so upgrades don't lose data. */
 const legacyConfigPath = (): string => join(configDir(), "mappings.json");
 
 export const emptyConfig = (): Config => ({ version: 1, mappings: {} });
@@ -81,11 +67,7 @@ const parseConfig = (parsed: unknown, path: string): Config => {
 };
 
 export const readConfig = (path = configPath()): Config => {
-    // The legacy fallback applies only to the default location. Honoring it for an explicit
-    // path would mean a caller asking for a file that doesn't exist silently gets the user's
-    // real config instead of an empty one.
-    const target =
-        existsSync(path) || path !== configPath() ? path : legacyConfigPath();
+    const target = existsSync(path) || path !== configPath() ? path : legacyConfigPath();
 
     if (!existsSync(target)) return emptyConfig();
 
@@ -101,15 +83,10 @@ export const readConfig = (path = configPath()): Config => {
 
 export const writeConfig = (config: Config, path = configPath()): void => {
     mkdirSync(dirname(path), { recursive: true });
-    // Names the user's accounts; no reason for it to be world-readable.
     writeFileSync(path, `${JSON.stringify(config, null, 2)}\n`, { mode: 0o600 });
 };
 
-/**
- * `SIMPLEFIN_MAP` carries the same mappings as the config for environments with no writable
- * home directory — chiefly GitHub Actions.
- * Format: `<ynabAccountId>=ACT-1+ACT-2;<ynabAccountId>=ACT-3`
- */
+/** Format: `<ynabAccountId>=ACT-1+ACT-2;<ynabAccountId>=ACT-3`. Used by SIMPLEFIN_MAP. */
 export const parseEnvMap = (value?: string | null): Record<string, string[]> => {
     const result: Record<string, string[]> = {};
     if (!value) return result;
@@ -143,41 +120,28 @@ export const parseEnvMap = (value?: string | null): Record<string, string[]> => 
 export const formatEnvMap = (mappings: AccountMapping[]): string =>
     mappings.map((m) => `${m.ynabAccountId}=${m.simplefinIds.join("+")}`).join(";");
 
-/** Environment wins, so CI and one-off overrides never need the config file touched. */
 export const resolveBudgetId = (config: Config = readConfig()): string | undefined =>
     process.env.YNAB_BUDGET_ID || config.budgetId;
 
-/**
- * Parses `SIMPLEFIN_ARCHIVE_ACCOUNTS`. Accepts `;` or `,` separators, and the literal `all`
- * to archive everything — which is also what an unset value means.
- */
+/** `all` returns undefined (archive everything); any other value returns the listed ids. */
 export const parseArchiveList = (value?: string | null): string[] | undefined => {
-    if (value === undefined || value === null) return undefined;
-
-    const trimmed = value.trim();
-    if (trimmed === "") return undefined;
+    const trimmed = (value ?? "").trim();
     if (trimmed.toLowerCase() === "all") return undefined;
 
-    const ids = trimmed
+    return trimmed
         .split(/[;,]/)
         .map((id) => id.trim())
         .filter((id) => id.length > 0);
-
-    return ids.length > 0 ? ids : undefined;
 };
 
 /**
- * `undefined` means archive every account. Environment wins over config.
- *
- * Presence is checked before parsing: `all` parses to `undefined` (meaning everything), which
- * is indistinguishable from "unset" once parsed. Falling back to the config there would let a
- * deliberate `all` override silently keep narrowing — and an account missed today cannot be
- * recovered after 90 days. An empty value counts as unset, so a blank CI secret is inert.
+ * Which accounts to archive. `undefined` means every account (including future ones); an empty
+ * array means none, which is the default. Environment wins over config.
  */
 export const resolveArchiveAccounts = (config: Config = readConfig()): string[] | undefined => {
     const fromEnv = process.env.SIMPLEFIN_ARCHIVE_ACCOUNTS;
     if (fromEnv !== undefined && fromEnv.trim() !== "") return parseArchiveList(fromEnv);
-    return config.archiveAccounts;
+    return config.archiveAccounts ?? [];
 };
 
 export interface ResolveSources {
@@ -185,11 +149,7 @@ export interface ResolveSources {
     env?: string | null;
 }
 
-/**
- * The note wins when both are present. It is the only mapping visible from inside YNAB, so
- * letting an invisible config silently override it would make a wrong balance very hard to
- * explain. `link` warns when it is about to be shadowed this way.
- */
+/** A YNAB account note takes precedence over the config, which takes precedence over the env. */
 export const resolveMappings = (
     ynabAccounts: YnabAccountLike[],
     sources: ResolveSources = {},
@@ -222,7 +182,6 @@ export const resolveMappings = (
     return resolved;
 };
 
-/** Accounts whose config mapping is being overridden by a note — worth telling the user about. */
 export const shadowedByNote = (ynabAccounts: YnabAccountLike[], config: Config): YnabAccountLike[] =>
     ynabAccounts.filter(
         (a) => !a.deleted && parseNote(a.note).length > 0 && config.mappings[a.id] !== undefined,

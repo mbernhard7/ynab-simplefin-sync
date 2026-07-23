@@ -168,9 +168,9 @@ test("suggestFor matches on shared name tokens and abstains when unsure", () => 
     assert.equal(suggestFor(ynab({ id: "a", name: "" }), candidates), -1);
 });
 
-test("parseArchiveList treats unset and 'all' as archive-everything", () => {
-    assert.equal(parseArchiveList(undefined), undefined);
-    assert.equal(parseArchiveList(""), undefined);
+test("parseArchiveList: empty is none, 'all' is everything, otherwise the listed ids", () => {
+    assert.deepEqual(parseArchiveList(undefined), []);
+    assert.deepEqual(parseArchiveList(""), []);
     assert.equal(parseArchiveList("all"), undefined);
     assert.equal(parseArchiveList("ALL"), undefined);
     assert.deepEqual(parseArchiveList("ACT-1;ACT-2"), ["ACT-1", "ACT-2"]);
@@ -178,7 +178,7 @@ test("parseArchiveList treats unset and 'all' as archive-everything", () => {
     assert.deepEqual(parseArchiveList(" ACT-1 "), ["ACT-1"]);
 });
 
-test("archiveAccounts round-trips and the environment overrides it", () => {
+test("archiveAccounts defaults to none, round-trips, and the environment overrides it", () => {
     const path = join(mkdtempSync(join(tmpdir(), "yss-")), "config.json");
     writeConfig({ version: 1, mappings: {}, archiveAccounts: ["ACT-cfg"] }, path);
 
@@ -192,12 +192,13 @@ test("archiveAccounts round-trips and the environment overrides it", () => {
         process.env.SIMPLEFIN_ARCHIVE_ACCOUNTS = "ACT-env";
         assert.deepEqual(resolveArchiveAccounts(loaded), ["ACT-env"]);
 
-        // "all" in the environment must override a narrowing config, not fall back to it.
+        // "all" in the environment means archive everything.
         process.env.SIMPLEFIN_ARCHIVE_ACCOUNTS = "all";
         assert.equal(resolveArchiveAccounts(loaded), undefined);
     } finally {
         delete process.env.SIMPLEFIN_ARCHIVE_ACCOUNTS;
     }
 
-    assert.equal(resolveArchiveAccounts({ version: 1, mappings: {} }), undefined);
+    // Nothing configured means nothing is archived.
+    assert.deepEqual(resolveArchiveAccounts({ version: 1, mappings: {} }), []);
 });

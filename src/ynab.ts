@@ -1,6 +1,6 @@
 import { API, NewTransaction, TransactionClearedStatus, TransactionFlagColor } from "ynab";
 import { ADJUSTMENT_IMPORT_ID_PREFIX, type AccountPlan, type YnabAccountLike } from "./reconcile";
-import { detail, info, warn } from "./log";
+import { info, warn } from "./log";
 
 export const PAYEE_NAME = "Balance Adjustment";
 
@@ -17,10 +17,9 @@ export const getAccounts = async (api: API, budgetId: string): Promise<YnabAccou
 };
 
 /**
- * Most recent real transaction date per account, as `YYYY-MM-DD`, for transactions on or after
- * `sinceDate`. This tool's own balance adjustments are excluded by their `import_id` prefix — a
- * fresh adjustment must not make an account look like it has activity newer than SimpleFIN on
- * the next run, which would make the account skip itself forever.
+ * Most recent transaction date per account (`YYYY-MM-DD`) since `sinceDate`. This tool's own
+ * adjustments are excluded by their `import_id` prefix so a fresh adjustment can't make an
+ * account look newer than SimpleFIN.
  */
 export const getLastActivityByAccount = async (
     api: API,
@@ -49,21 +48,7 @@ export interface ApplyResult {
     error?: string;
 }
 
-/**
- * Posts one adjustment per account per day rather than one per run: the day's transaction is
- * looked up by import_id and amended in place, so four runs a day leave a single row behind.
- *
- * `plan.deltaMilliunits` is the gap between the SimpleFIN balance and the *current* YNAB
- * balance, which already includes any earlier adjustment from today — so amending means adding
- * the delta to the existing amount, not replacing it.
- */
-/**
- * Turn whatever the ynab SDK throws into a legible message. On a non-2xx response it throws a
- * ResponseError carrying the raw HTTP Response, whose own `.message` is only a generic "Response
- * returned an error code" — and a bare object stringifies to a useless "[object Object]". Read
- * the status and YNAB's structured `error.detail` out of the body so a failure says what went
- * wrong (a 429 rate-limit, a 400 validation error, a 409 duplicate import_id, ...).
- */
+/** Reads the HTTP status and YNAB's structured error detail out of whatever the SDK throws. */
 export const describeApiError = async (err: unknown): Promise<string> => {
     const response = (err as { response?: Response } | null)?.response;
     if (response && typeof response.status === "number") {
@@ -72,7 +57,7 @@ export const describeApiError = async (err: unknown): Promise<string> => {
             const body = (await response.clone().json()) as { error?: { name?: string; detail?: string; id?: string } };
             detail = body.error?.detail ?? body.error?.name ?? body.error?.id ?? "";
         } catch {
-            // Body was empty or not JSON; the status alone still beats "[object Object]".
+            // Body was empty or not JSON.
         }
         return `YNAB API ${response.status} ${response.statusText}${detail ? `: ${detail}` : ""}`.trim();
     }
@@ -86,6 +71,11 @@ export const describeApiError = async (err: unknown): Promise<string> => {
     }
 };
 
+/**
+ * Posts one adjustment per account per day: the day's transaction is looked up by `import_id`
+ * and amended in place. `plan.deltaMilliunits` is the gap against the current YNAB balance, so
+ * amending adds the delta to the existing amount rather than replacing it.
+ */
 export const applyPlan = async (api: API, budgetId: string, plan: AccountPlan): Promise<ApplyResult> => {
     if (plan.action !== "adjust" || plan.deltaMilliunits === undefined || !plan.importId || !plan.date) {
         throw new Error(`applyPlan called with a non-adjustable plan for ${plan.ynabAccountName}`);
@@ -142,8 +132,7 @@ export const applyPlans = async (
 ): Promise<ApplyResult[]> => {
     const results: ApplyResult[] = [];
 
-    // Sequential on purpose: concurrent writes to the same budget race on import_id uniqueness,
-    // and five accounts is not worth the risk of a duplicate adjustment.
+    // Sequential: concurrent writes to one budget race on import_id uniqueness.
     for (const plan of plans) {
         const result = await applyPlan(api, budgetId, plan);
         if (result.outcome === "failed") {
@@ -155,11 +144,4 @@ export const applyPlans = async (
     }
 
     return results;
-};
-
-export const printDiscovery = (accounts: { id: string; name: string; note?: string | null }[]) => {
-    info(`YNAB accounts (${accounts.length}):`);
-    for (const a of accounts) {
-        detail(`${a.name} — note: ${a.note ? JSON.stringify(a.note) : "(none)"}`);
-    }
 };

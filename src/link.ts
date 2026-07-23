@@ -25,10 +25,7 @@ export interface LinkOptions {
     printOnly?: boolean;
 }
 
-/**
- * Parses "1,3,5" / "1 3 5" / "all" / "none" into zero-based indices.
- * Returns null when the input is unusable so the caller can re-prompt.
- */
+/** Parses "1,3,5" / "1 3 5" / "all" / "none" into zero-based indices, or null if unusable. */
 export const parseSelection = (input: string, max: number): number[] | null => {
     const trimmed = input.trim().toLowerCase();
     if (trimmed === "" || trimmed === "none" || trimmed === "skip") return [];
@@ -54,7 +51,6 @@ const balanceLabel = (account: SimpleFinAccount): string => {
 const orgLabel = (account: SimpleFinAccount): string =>
     account.org?.name ?? account.org?.domain ?? "unknown org";
 
-/** Cheap token overlap, used only to mark a suggestion — never to auto-select. */
 const similarity = (a: string, b: string): number => {
     const tokens = (s: string) =>
         new Set(
@@ -76,7 +72,7 @@ const similarity = (a: string, b: string): number => {
 
 export const suggestFor = (ynabAccount: YnabAccountLike, candidates: SimpleFinAccount[]): number => {
     let best = -1;
-    let bestScore = 0.34; // Require more than a single incidental word in common.
+    let bestScore = 0.34;
 
     candidates.forEach((candidate, index) => {
         const score = similarity(ynabAccount.name, `${orgLabel(candidate)} ${candidate.name}`);
@@ -190,7 +186,6 @@ export const link = async (options: LinkOptions): Promise<AccountMapping[]> => {
             detail(`${nameById.get(mapping.ynabAccountId)} → ${mapping.simplefinIds.join(" + ")}`);
         }
 
-        // A leftover note key would silently win over everything written here.
         const shadowed = chosen.filter((m) => {
             const account = ynabAccounts.find((a) => a.id === m.ynabAccountId);
             const noteIds = parseNote(account?.note);

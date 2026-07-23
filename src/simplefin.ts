@@ -30,21 +30,13 @@ export interface SimpleFinAccountSet {
     accounts: SimpleFinAccount[];
     /** v2 structured errors. */
     errlist: SimpleFinError[];
-    /** v1 string errors, still emitted by the Bridge. Rate-limit warnings arrive here. */
+    /** v1 string errors, still emitted by the Bridge. */
     errors: string[];
-    /**
-     * The unmodified response body. Parsing deliberately narrows to the fields this tool
-     * models, which drops the Bridge's non-standard extensions — `holdings` above all. The
-     * archive stores this instead so nothing is lost to our schema.
-     */
+    /** The unmodified response body, kept so the archive loses nothing to our schema. */
     raw?: unknown;
 }
 
-/**
- * Exchange a single-use Setup Token for a permanent Access URL.
- * The token is base64 of the claim URL; POSTing to it returns the Access URL as plain text.
- * This can only ever be done once per token.
- */
+/** Exchange a single-use Setup Token (base64 of a claim URL) for a permanent Access URL. */
 export const claimSetupToken = async (setupToken: string): Promise<string> => {
     const claimUrl = Buffer.from(setupToken.trim(), "base64").toString("utf8").trim();
 
@@ -73,10 +65,7 @@ export const claimSetupToken = async (setupToken: string): Promise<string> => {
 const isRecord = (v: unknown): v is Record<string, unknown> =>
     typeof v === "object" && v !== null && !Array.isArray(v);
 
-/**
- * Validates the shape we depend on. An account missing `id`, `balance` or `balance-date` is
- * dropped rather than defaulted — a defaulted balance would post a real adjustment to YNAB.
- */
+/** An account missing `id`, `balance`, or `balance-date` is dropped rather than defaulted. */
 const parseAccountSet = (body: unknown): SimpleFinAccountSet => {
     if (!isRecord(body)) {
         throw new Error("SimpleFIN response was not a JSON object.");
@@ -128,19 +117,10 @@ export const MAX_WINDOW_DAYS = 90;
 
 export interface GetAccountsOptions {
     now?: Date;
-    /**
-     * Days of transaction history to request. Omit or 0 for balances only — the sync itself
-     * never reads transactions. The archive asks for the full window because institutions
-     * post transactions late: a dividend transacted 2026-06-23 posted on 2026-07-10.
-     */
+    /** Days of transaction history to request. Omit or 0 for balances only. */
     days?: number;
 }
 
-/**
- * One GET covers every connected institution, and counts as one request against the Bridge's
- * ~24/day quota regardless of the window size. Archiving therefore rides along on the sync's
- * request rather than spending another.
- */
 export const getAccounts = async (
     accessUrl: string,
     options: GetAccountsOptions = {},
@@ -152,8 +132,6 @@ export const getAccounts = async (
     const url = new URL(`${base}/accounts`);
 
     if (days === 0) {
-        // Empty window: `balances-only` is honored by the Bridge, and a `start-date` of now
-        // is the portable fallback.
         url.searchParams.set("balances-only", "1");
         url.searchParams.set("start-date", String(Math.floor(now.getTime() / 1000)));
     } else {
