@@ -1,6 +1,6 @@
 {
   "name": "ynab-simplefin-sync",
-  "version": "2.4.1",
+  "version": "3.0.0",
   "description": "Reconcile YNAB account balances against SimpleFIN Bridge.",
   "author": "Miles Bernhard <me@milesbernhard.com>",
   "license": "MIT",
