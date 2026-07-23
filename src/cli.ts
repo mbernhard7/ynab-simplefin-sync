@@ -12,64 +12,48 @@ import { loadEnv } from "./env";
 import { run } from "./run";
 
 const USAGE = `
-ynab-simplefin-sync — reconcile YNAB investment balances against SimpleFIN
+ynab-simplefin-sync — reconcile YNAB balances against SimpleFIN
 
-  setup                Guided first-run: credentials, budget, then account mapping
-  sync                 Fetch balances and post one adjustment per account per day (default)
-  link                 Interactively pick YNAB accounts and their SimpleFIN counterparts
-  discover             List SimpleFIN and YNAB accounts so they can be mapped
-  select-archive       Interactively pick which accounts the archive should include
-  claim <setup-token>  Exchange a single-use Setup Token for a permanent Access URL
+Usage: ynab-simplefin-sync <command> [options]
 
-Options (setup):
-  --skip-link          Stop after credentials and budget
+Commands:
+  sync            Fetch balances and post one adjustment per account (default)
+  setup           Guided first run: credentials, budget, mappings, archive
+  link            Map YNAB accounts to SimpleFIN accounts
+  discover        List SimpleFIN and YNAB accounts
+  claim <token>   Exchange a SimpleFIN setup token for an access URL
+  help            Show this help
 
-Options (link):
-  --print-only         Choose mappings and print them without saving
+Options:
+  sync    --dry-run  --force  --stale-hours <n>  --threshold <usd>  --archive <dir>
+  link    --archive  --print-only
+  setup   --skip-link
 
-Options (sync):
-  --dry-run            Print the plan without writing to YNAB
-  --force              Bypass the large-adjustment safety guard
-  --stale-hours <n>    Flag balances older than n hours (default 36)
-  --threshold <usd>    Absolute floor for the safety guard (default 25000)
-  --archive <dir>      Also save the full 90-day response to <dir> (or ARCHIVE_DIR)
+Environment:
+  YNAB_API_TOKEN                required
+  SIMPLEFIN_ACCESS_URL         required
+  YNAB_BUDGET_ID               required (or "budgetId" in the config)
+  SIMPLEFIN_MAP                account mappings (id=ACT-1+ACT-2;id2=ACT-3)
+  SIMPLEFIN_ARCHIVE_ACCOUNTS   accounts to archive (ACT-1;ACT-2, or "all"); default none
+  ARCHIVE_DIR                  directory for archived snapshots
+  DRY_RUN=1                    same as --dry-run
 
-Secrets — environment only, never written to the config:
-  YNAB_API_TOKEN         required
-  SIMPLEFIN_ACCESS_URL   required
-
-Settings — config file, overridable by environment:
-  YNAB_BUDGET_ID         else "budgetId" in the config
-  SIMPLEFIN_MAP          else "mappings" in the config (id=ACT-1+ACT-2;id2=ACT-3)
-  SIMPLEFIN_ARCHIVE_ACCOUNTS
-                         else "archiveAccounts" in the config; "all" or unset archives
-                         every account (ACT-1;ACT-2)
-
-Other:
-  DRY_RUN=1              same as --dry-run
-
-Secrets are read from ./.env and ~/.config/ynab-simplefin-sync/.env when present.
-Real environment variables always win over both.
+Secrets are also read from ./.env and ~/.config/ynab-simplefin-sync/.env.
 `.trim();
 
 const requireEnv = (name: string): string => {
     const value = process.env[name];
     if (!value) {
-        throw new Error(
-            `Missing required credential: ${name}. Run \`ynab-simplefin-sync setup\`, ` +
-            `or export it yourself.`,
-        );
+        throw new Error(`Missing required credential: ${name}. Run \`ynab-simplefin-sync setup\`, or export it.`);
     }
     return value;
 };
 
-/** Environment first, then the config file written by `setup`. */
 const requireBudgetId = (): string => {
     const budgetId = resolveBudgetId();
     if (!budgetId) {
         throw new Error(
-            `No budget configured. Run \`ynab-simplefin-sync setup\`, set YNAB_BUDGET_ID, ` +
-            `or add "budgetId" to ${configPath()}.`,
+            `No budget configured. Run \`ynab-simplefin-sync setup\`, set YNAB_BUDGET_ID, or add "budgetId" to ${configPath()}.`,
         );
     }
     return budgetId;
@@ -85,6 +69,17 @@ const numericFlag = (argv: string[], flag: string): number | undefined => {
         throw new Error(`${flag} requires a numeric value`);
     }
     return parsed;
+};
+
+const stringFlag = (argv: string[], flag: string): string | undefined => {
+    const index = argv.indexOf(flag);
+    if (index === -1) return undefined;
+
+    const value = argv[index + 1];
+    if (value === undefined || value.startsWith("--")) {
+        throw new Error(`${flag} requires a directory`);
+    }
+    return value;
 };
 
 const discover = async () => {
@@ -117,18 +112,13 @@ const discover = async () => {
     const ynabAccounts = await getYnabAccounts(new API(token), budgetId);
     const open = ynabAccounts.filter((a) => !a.deleted && !a.closed);
     const resolved = new Map(
-        resolveMappings(open, { config: readConfig(), env: process.env.SIMPLEFIN_MAP }).map((m) => [
-            m.ynabAccountId,
-            m,
-        ]),
+        resolveMappings(open, { config: readConfig(), env: process.env.SIMPLEFIN_MAP }).map((m) => [m.ynabAccountId, m]),
     );
 
     info(`YNAB accounts (${open.length} open):`);
     for (const account of open) {
         const mapping = resolved.get(account.id);
-        const status = mapping
-            ? `mapped via ${mapping.source} → ${mapping.simplefinIds.join(" + ")}`
-            : "unmapped";
+        const status = mapping ? `mapped via ${mapping.source} → ${mapping.simplefinIds.join(" + ")}` : "unmapped";
         detail(`${account.name} — ${formatMilliunits(account.balance)} — ${status}`);
     }
 
@@ -145,17 +135,6 @@ const claim = async (setupToken?: string) => {
     console.log(accessUrl);
 };
 
-const stringFlag = (argv: string[], flag: string): string | undefined => {
-    const index = argv.indexOf(flag);
-    if (index === -1) return undefined;
-
-    const value = argv[index + 1];
-    if (value === undefined || value.startsWith("--")) {
-        throw new Error(`${flag} requires a directory`);
-    }
-    return value;
-};
-
 const sync = async (argv: string[]) => {
     const thresholdUsd = numericFlag(argv, "--threshold");
 
@@ -170,12 +149,8 @@ const sync = async (argv: string[]) => {
         thresholdAbsolute: thresholdUsd === undefined ? undefined : Math.round(thresholdUsd * 1000),
     });
 
-    info(
-        `Done. applied=${summary.applied} failed=${summary.failed} blocked=${summary.blocked}`,
-    );
+    info(`Done. applied=${summary.applied} failed=${summary.failed} blocked=${summary.blocked}`);
 
-    // Surface a red CI run for anything that needs a human: a dead connection, a tripped
-    // guard, or a rejected write. Silence here would look identical to a healthy sync.
     if (summary.failed > 0 || summary.blocked > 0) {
         process.exitCode = 2;
     }
@@ -192,20 +167,13 @@ const main = async () => {
             return setup({ skipLink: argv.includes("--skip-link") });
         case "sync":
             return sync(argv);
-        case "link":
-            await link({
-                accessUrl: requireEnv("SIMPLEFIN_ACCESS_URL"),
-                ynabToken: requireEnv("YNAB_API_TOKEN"),
-                budgetId: requireBudgetId(),
-                printOnly: argv.includes("--print-only"),
-            });
+        case "link": {
+            const accessUrl = requireEnv("SIMPLEFIN_ACCESS_URL");
+            const printOnly = argv.includes("--print-only");
+            await link({ accessUrl, ynabToken: requireEnv("YNAB_API_TOKEN"), budgetId: requireBudgetId(), printOnly });
+            if (argv.includes("--archive")) await selectArchive({ accessUrl, printOnly });
             return;
-        case "select-archive":
-            await selectArchive({
-                accessUrl: requireEnv("SIMPLEFIN_ACCESS_URL"),
-                printOnly: argv.includes("--print-only"),
-            });
-            return;
+        }
         case "discover":
             return discover();
         case "claim":

@@ -3,7 +3,7 @@ import { stdin, stdout } from "node:process";
 import { getAccounts as getSimpleFinAccounts } from "./simplefin";
 import { readConfig, resolveArchiveAccounts, writeConfig } from "./config";
 import { shellQuote } from "./env";
-import { detail, formatMilliunits, info, warn } from "./log";
+import { detail, formatMilliunits, info } from "./log";
 import { toMilliunits } from "./money";
 import { parseSelection } from "./link";
 
@@ -14,7 +14,7 @@ export interface SelectArchiveOptions {
 
 export const selectArchive = async (options: SelectArchiveOptions): Promise<string[]> => {
     if (!stdin.isTTY) {
-        throw new Error("`select-archive` is interactive and needs a terminal.");
+        throw new Error("Archive selection is interactive and needs a terminal.");
     }
 
     info("Fetching SimpleFIN accounts...");
@@ -30,7 +30,11 @@ export const selectArchive = async (options: SelectArchiveOptions): Promise<stri
 
     try {
         console.log("");
-        info("SimpleFIN accounts — pick the ones to archive:");
+        info("Archiving saves each account's full transaction history to a directory you choose");
+        info("(--archive / ARCHIVE_DIR). It is optional and off by default.");
+
+        console.log("");
+        info("SimpleFIN accounts:");
         accountSet.accounts.forEach((account, index) => {
             const org = account.org?.name ?? account.org?.domain ?? "unknown org";
             let balance: string;
@@ -39,44 +43,33 @@ export const selectArchive = async (options: SelectArchiveOptions): Promise<stri
             } catch {
                 balance = account.balance;
             }
-            const mark = current === undefined ? "" : current.includes(account.id) ? " ← archived" : "";
-            detail(`${String(index + 1).padStart(2)}. ${org} · ${account.name} — ${balance}${mark}`);
+            const archived = current === undefined || current.includes(account.id);
+            detail(`${String(index + 1).padStart(2)}. ${org} · ${account.name} — ${balance}${archived ? " ← archived" : ""}`);
         });
-
-        console.log("");
-        if (current === undefined) {
-            info("Currently archiving ALL accounts.");
-        }
-        warn("SimpleFIN only serves a rolling 90-day window, so anything you exclude");
-        warn("is unrecoverable once it ages out. Excluding is a real, permanent choice.");
 
         console.log("");
         let picks: number[] | null = null;
         while (picks === null) {
-            const answer = await rl.question("Which accounts should be archived? (e.g. 1,3,5 / all) ");
+            const answer = await rl.question("Which accounts should be archived? (e.g. 1,3,5 / all / none) ");
             picks = parseSelection(answer, accountSet.accounts.length);
             if (picks === null) console.log(`  Enter numbers between 1 and ${accountSet.accounts.length}.`);
         }
 
         if (picks.length === 0) {
-            info("Nothing selected — leaving the current setting alone.");
-            return current ?? [];
+            if (!options.printOnly) {
+                delete config.archiveAccounts;
+                writeConfig(config);
+            }
+            info("No accounts will be archived.");
+            return [];
         }
 
         const chosen = picks.map((i) => accountSet.accounts[i]!);
         const ids = chosen.map((a) => a.id);
-        const everything = ids.length === accountSet.accounts.length;
 
         console.log("");
         info("Will archive:");
         for (const account of chosen) detail(`${account.org?.name ?? "?"} · ${account.name}`);
-
-        const dropped = accountSet.accounts.filter((a) => !ids.includes(a.id));
-        if (dropped.length > 0) {
-            console.log("");
-            info("Will NOT archive:");
-            for (const account of dropped) detail(`${account.org?.name ?? "?"} · ${account.name}`);
-        }
 
         console.log("");
         const answer = (await rl.question("Save? [y/N] ")).trim().toLowerCase();
@@ -86,26 +79,17 @@ export const selectArchive = async (options: SelectArchiveOptions): Promise<stri
         }
 
         if (!options.printOnly) {
-            if (everything) {
-                // Storing an explicit full list would silently stop archiving any account
-                // added to the Bridge later. Absent means "everything, including future ones".
-                delete config.archiveAccounts;
-                info("Archiving all accounts, including any added later.");
-            } else {
-                config.archiveAccounts = ids;
-            }
+            config.archiveAccounts = ids;
             writeConfig(config);
             info("Saved.");
         }
 
         console.log("");
-        info("For CI, set this as the SIMPLEFIN_ARCHIVE_ACCOUNTS secret:");
-        console.log(`  ${everything ? "all" : ids.join(";")}`);
-        console.log("");
-        detail("Or:");
-        console.log(
-            `  gh secret set SIMPLEFIN_ARCHIVE_ACCOUNTS --body ${shellQuote(everything ? "all" : ids.join(";"))}`,
-        );
+        info("For CI, set the SIMPLEFIN_ARCHIVE_ACCOUNTS secret:");
+        console.log(`  gh secret set SIMPLEFIN_ARCHIVE_ACCOUNTS --body ${shellQuote(ids.join(";"))}`);
+        if (ids.length === accountSet.accounts.length) {
+            detail("Or use `all` to also archive accounts you connect later.");
+        }
 
         return ids;
     } finally {

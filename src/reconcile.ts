@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { toMilliunits } from "./money";
 import type { SimpleFinAccount, SimpleFinAccountSet, SimpleFinError } from "./simplefin";
 
-/** The subset of a YNAB account this module needs. `balance` is cleared + uncleared, in milliunits. */
+/** `balance` is cleared + uncleared, in milliunits. */
 export interface YnabAccountLike {
     id: string;
     name: string;
@@ -44,16 +44,9 @@ export interface AccountPlan {
 }
 
 export interface ReconcileOptions {
-    /**
-     * Pre-resolved account mappings. When omitted, mappings are read from YNAB account notes.
-     * `resolveMappings` in ./mapping layers notes over the config file and SIMPLEFIN_MAP.
-     */
+    /** Pre-resolved mappings; when omitted, read from YNAB account notes. */
     mappings?: { ynabAccountId: string; simplefinIds: string[] }[];
-    /**
-     * Most recent real (non-adjustment) YNAB transaction date per account, as `YYYY-MM-DD`.
-     * When an account's newest activity is later than SimpleFIN's balance-date, SimpleFIN has
-     * not yet caught up and reconciling would revert that activity — so the account is skipped.
-     */
+    /** Most recent non-adjustment YNAB transaction date per account, as `YYYY-MM-DD`. */
     lastActivityByAccount?: Map<string, string>;
     now?: Date;
     /** Flag a balance as stale past this age. Stale balances are still reconciled. */
@@ -74,11 +67,7 @@ const DEFAULTS = {
 
 const NOTE_PATTERN = /SIMPLEFIN:([A-Za-z0-9_\-+]+)/i;
 
-/**
- * Reads the mapping key out of a YNAB account note. `+` sums several SimpleFIN accounts into
- * one YNAB account, which is what HSA custodians need — they expose the cash side and the
- * investment side as separate accounts.
- */
+/** Reads the SIMPLEFIN: key from a YNAB note; `+` sums several SimpleFIN accounts into one. */
 export const parseNote = (note?: string | null): string[] => {
     const match = NOTE_PATTERN.exec(note ?? "");
     if (!match?.[1]) return [];
@@ -151,7 +140,6 @@ export const reconcile = (
         for (const id of simplefinIds) {
             const account = byId.get(id);
 
-            // An account we asked for but did not get back must never be treated as zero.
             if (!account) {
                 skip = {
                     reason: "account-missing",
@@ -204,9 +192,7 @@ export const reconcile = (
             continue;
         }
 
-        // SimpleFIN can lag YNAB: an institution has not refreshed since a transaction was added
-        // in YNAB. Reconciling then would revert that transaction, so skip until SimpleFIN's
-        // balance-date catches up. Compared at day granularity — YNAB dates carry no time.
+        // Skip when YNAB's newest activity is later than SimpleFIN's balance-date (day granularity).
         const lastActivity = options.lastActivityByAccount?.get(ynabAccount.id);
         if (!options.force && lastActivity !== undefined && balanceDate !== undefined) {
             const balanceDay = localDate(balanceDate);
@@ -227,7 +213,6 @@ export const reconcile = (
             }
         }
 
-        // Guards against an institution briefly reporting a partial or zeroed balance.
         const limit = Math.max(thresholdAbsolute, Math.abs(ynabAccount.balance) * thresholdRelative);
         if (!options.force && Math.abs(delta) > limit) {
             plans.push({

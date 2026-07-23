@@ -41,11 +41,7 @@ const nestedCount = (account: unknown, key: "transactions" | "holdings"): number
     return Array.isArray(value) ? value.length : 0;
 };
 
-/**
- * Narrows the response to the given account ids, leaving every other top-level field intact
- * so errors and metadata survive. Returns the ids dropped and the ids asked for but absent —
- * the latter matters because a stale id would otherwise silently archive nothing.
- */
+/** Narrows the response to the given ids. Returns the ids dropped and the ids asked for but absent. */
 export const filterAccounts = (
     raw: unknown,
     only: string[] | undefined,
@@ -73,28 +69,16 @@ export const filterAccounts = (
     return { raw: { ...(raw as Record<string, unknown>), accounts: kept }, excluded, missing };
 };
 
-/** SimpleFIN ids are opaque tokens; keep them recognizable but safe as a path segment. */
 const safeSegment = (id: string): string => id.replace(/[^A-Za-z0-9._-]/g, "_");
 
-/**
- * UTC timestamp of the balance as a filename-safe string, e.g. 2026-07-23T12-00-00Z. An account
- * that has not been refreshed keeps the same `balance-date`, so it maps to the same filename and
- * the write is skipped. `undated` covers a malformed account with no numeric balance-date.
- */
+/** Balance timestamp as a filename-safe UTC string, e.g. 2026-07-23T12-00-00Z. */
 const stampFor = (bd: number | undefined): string =>
     bd === undefined ? "undated" : new Date(bd * 1000).toISOString().slice(0, 19).replace(/:/g, "-") + "Z";
 
 /**
- * Archives each account under `<dir>/<account-id>/<balance-date>.json`, storing the raw account
- * object verbatim so non-standard Bridge extensions (holdings above all) survive our schema.
- *
- * Keyed by `balance-date`, the write is idempotent per refresh: a run only produces a file when
- * SimpleFIN has actually advanced that account since the last snapshot. Polling every couple of
- * hours therefore writes nothing until an institution refreshes, and each stored file is a
- * distinct point-in-time balance rather than one churning daily blob.
- *
- * Stored uncompressed on purpose — git deltas near-identical JSON to almost nothing, which gzip
- * would defeat.
+ * Writes each account's raw object to `<dir>/<account-id>/<balance-date>.json`. Keyed by
+ * `balance-date`, the write is skipped when that account already has a file for the same
+ * timestamp, so a run only produces files for accounts SimpleFIN has refreshed.
  */
 export const writeSnapshot = (
     dir: string,
@@ -126,7 +110,6 @@ export const writeSnapshot = (
         const accountDir = join(dir, safeSegment(id));
         const path = join(accountDir, `${stampFor(bd)}.json`);
 
-        // Same account, same balance-date — SimpleFIN has not refreshed it since we last wrote.
         if (existsSync(path)) {
             unchanged.push(id);
             continue;
@@ -134,7 +117,7 @@ export const writeSnapshot = (
 
         mkdirSync(accountDir, { recursive: true });
         const contents = `${JSON.stringify(account, null, 2)}\n`;
-        // The snapshot holds full transaction history, including card spend.
+        // Contains full transaction history; keep it owner-only.
         writeFileSync(path, contents, { mode: 0o600 });
 
         written.push({ id, path, bytes: Buffer.byteLength(contents), balanceDate: bd });

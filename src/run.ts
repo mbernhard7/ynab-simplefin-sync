@@ -1,10 +1,9 @@
 import { API } from "ynab";
-import { getAccounts as getSimpleFinAccounts } from "./simplefin";
+import { getAccounts as getSimpleFinAccounts, MAX_WINDOW_DAYS } from "./simplefin";
 import { localDate, reconcile, type AccountPlan, type ReconcileOptions } from "./reconcile";
 import { applyPlans, getAccounts as getYnabAccounts, getLastActivityByAccount } from "./ynab";
 import { readConfig, resolveArchiveAccounts, resolveMappings } from "./config";
 import { writeSnapshot } from "./archive";
-import { MAX_WINDOW_DAYS } from "./simplefin";
 import { detail, formatMilliunits, info, warn } from "./log";
 
 export interface RunOptions extends ReconcileOptions {
@@ -12,9 +11,9 @@ export interface RunOptions extends ReconcileOptions {
     ynabToken: string;
     budgetId: string;
     dryRun?: boolean;
-    /** When set, the full 90-day response is written here before reconciling. */
+    /** When set, snapshots are written here before reconciling. */
     archiveDir?: string;
-    /** SimpleFIN account ids to archive. Omit to archive everything. */
+    /** SimpleFIN account ids to archive. Omit to use the configured set (none by default). */
     archiveAccounts?: string[];
 }
 
@@ -43,6 +42,34 @@ const describePlan = (plan: AccountPlan): string => {
     }
 };
 
+const writeArchive = (dir: string, accountSet: Parameters<typeof writeSnapshot>[1], only: string[] | undefined): void => {
+    if (only !== undefined && only.length === 0) {
+        info("Archiving is enabled but no accounts are selected; run `link --archive` to choose.");
+        return;
+    }
+
+    const snapshot = writeSnapshot(dir, accountSet, new Date(), only);
+
+    if (snapshot.written.length > 0) {
+        const bytes = snapshot.written.reduce((sum, w) => sum + w.bytes, 0);
+        info(
+            `Archived ${snapshot.written.length} updated account(s), ${snapshot.transactions} transaction(s), ` +
+            `${snapshot.holdings} holding(s) → ${snapshot.dir} (${Math.round(bytes / 1024)}KB)`,
+        );
+    } else {
+        info("Archive up to date — no account has a newer SimpleFIN balance-date since the last snapshot.");
+    }
+    if (snapshot.unchanged.length > 0) {
+        detail(`${snapshot.unchanged.length} account(s) unchanged since the last snapshot.`);
+    }
+    if (snapshot.excluded.length > 0) {
+        detail(`Excluded ${snapshot.excluded.length} account(s) by configuration.`);
+    }
+    for (const id of snapshot.missing) {
+        warn(`Archive list names ${id}, which SimpleFIN did not return.`);
+    }
+};
+
 export const run = async (options: RunOptions): Promise<RunSummary> => {
     const api = new API(options.ynabToken);
 
@@ -52,8 +79,7 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
     const config = readConfig();
 
     const mappings =
-        options.mappings ??
-        resolveMappings(ynabAccounts, { config, env: process.env.SIMPLEFIN_MAP });
+        options.mappings ?? resolveMappings(ynabAccounts, { config, env: process.env.SIMPLEFIN_MAP });
 
     const bySource = mappings.reduce<Record<string, number>>((acc, m) => {
         const source = "source" in m ? String(m.source) : "note";
@@ -74,54 +100,26 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
     const mappedIds = new Set(mappings.map((m) => m.ynabAccountId));
     const mapped = ynabAccounts.filter((a) => mappedIds.has(a.id));
 
-    // Archiving rides on this one request — the Bridge's quota counts requests, not bytes.
     const archiving = Boolean(options.archiveDir);
     info(archiving ? `Fetching SimpleFIN balances and ${MAX_WINDOW_DAYS}d of history...` : "Fetching SimpleFIN balances...");
-    const accountSet = await getSimpleFinAccounts(options.accessUrl, {
-        days: archiving ? MAX_WINDOW_DAYS : 0,
-    });
+    const accountSet = await getSimpleFinAccounts(options.accessUrl, { days: archiving ? MAX_WINDOW_DAYS : 0 });
     info(`Fetched ${accountSet.accounts.length} SimpleFIN account(s).`);
 
     for (const err of accountSet.errors) {
         warn(`SimpleFIN: ${err}`);
     }
 
-    // Written before reconciling: a snapshot is worth keeping even if the YNAB half fails,
-    // and the 90-day window means anything missed today is unrecoverable later.
+    // Written before reconciling so a snapshot survives even if the YNAB half fails.
     if (options.archiveDir) {
         try {
-            const only = options.archiveAccounts ?? resolveArchiveAccounts(config);
-            const snapshot = writeSnapshot(options.archiveDir, accountSet, new Date(), only);
-
-            if (snapshot.written.length > 0) {
-                const bytes = snapshot.written.reduce((sum, w) => sum + w.bytes, 0);
-                info(
-                    `Archived ${snapshot.written.length} updated account(s), ${snapshot.transactions} transaction(s), ` +
-                    `${snapshot.holdings} holding(s) → ${snapshot.dir} (${Math.round(bytes / 1024)}KB)`,
-                );
-            } else {
-                info("Archive up to date — no account has a newer SimpleFIN balance-date since the last snapshot.");
-            }
-            if (snapshot.unchanged.length > 0) {
-                detail(`${snapshot.unchanged.length} account(s) unchanged since the last snapshot.`);
-            }
-            if (snapshot.excluded.length > 0) {
-                detail(`Excluded ${snapshot.excluded.length} account(s) by configuration.`);
-            }
-            // A stale id silently archives nothing for that account, and the 90-day window
-            // means the omission cannot be repaired later.
-            for (const id of snapshot.missing) {
-                warn(`Archive list names ${id}, which SimpleFIN did not return.`);
-            }
+            writeArchive(options.archiveDir, accountSet, options.archiveAccounts ?? resolveArchiveAccounts(config));
         } catch (err) {
             warn(`Archive failed: ${err instanceof Error ? err.message : String(err)}`);
         }
     }
 
-    // SimpleFIN sometimes lags YNAB — the institution hasn't refreshed since a transaction was
-    // added in YNAB. Reconciling then would revert that transaction, so fetch each mapped
-    // account's most recent activity and let reconcile skip any account YNAB is ahead of. The
-    // lookback starts at the oldest mapped balance-date so even a stale account is covered.
+    // Skip an account whose newest YNAB transaction is later than SimpleFIN's balance-date,
+    // so a lagging institution does not revert activity just added in YNAB.
     let lastActivityByAccount: Map<string, string> | undefined;
     const mappedSimplefinIds = new Set(mappings.flatMap((m) => m.simplefinIds));
     const balanceDates = accountSet.accounts
@@ -145,8 +143,6 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
     }
 
     const adjustments = plans.filter((p) => p.action === "adjust");
-    // "account-closed" is intentional configuration, and "ynab-ahead" is a transient timing skip
-    // that resolves itself once SimpleFIN refreshes — neither should turn the run red.
     const blocked = plans.filter(
         (p) => p.action === "skip" && p.reason !== "account-closed" && p.reason !== "ynab-ahead",
     ).length;

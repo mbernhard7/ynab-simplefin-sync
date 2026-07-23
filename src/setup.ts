@@ -1,4 +1,4 @@
-import { appendFileSync, existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
+import { existsSync, readFileSync, writeFileSync, mkdirSync, chmodSync } from "node:fs";
 import { dirname } from "node:path";
 import { createInterface, type Interface } from "node:readline/promises";
 import { stdin, stdout } from "node:process";
@@ -7,13 +7,10 @@ import { claimSetupToken } from "./simplefin";
 import { readConfig, writeConfig, type Config } from "./config";
 import { configEnvPath, shellQuote } from "./env";
 import { link } from "./link";
-import { detail, info, warn } from "./log";
+import { selectArchive } from "./selectArchive";
+import { detail, info } from "./log";
 
-/**
- * Reads a value without echoing it. readline has no first-class support, so this swaps the
- * private writer for the duration of the prompt. If the swap ever stops working the value is
- * echoed rather than lost — annoying, not dangerous, on a local terminal.
- */
+/** Reads a value without echoing it by muting readline's writer for the prompt. */
 const askSecret = async (rl: Interface, query: string): Promise<string> => {
     const internal = rl as unknown as {
         _writeToOutput?: (text: string) => void;
@@ -52,6 +49,15 @@ const confirm = async (rl: Interface, query: string, defaultYes = true): Promise
     return answer === "y" || answer === "yes";
 };
 
+const askOnce = async (query: string): Promise<string> => {
+    const rl = createInterface({ input: stdin, output: stdout });
+    try {
+        return (await rl.question(query)).trim();
+    } finally {
+        rl.close();
+    }
+};
+
 const looksLikeAccessUrl = (value: string): boolean => /^https:\/\/[^/]+:[^/]+@/.test(value);
 
 /** Rewrites KEY in place if present, appends otherwise, so re-running setup doesn't duplicate. */
@@ -73,7 +79,7 @@ export const upsertEnvFile = (path: string, values: Record<string, string>): voi
 };
 
 export interface SetupOptions {
-    /** Skip the interactive `link` step at the end. */
+    /** Skip the interactive mapping and archive steps. */
     skipLink?: boolean;
 }
 
@@ -92,7 +98,6 @@ export const setup = async (options: SetupOptions = {}): Promise<void> => {
         detail(`Settings → ${dirname(envPath)}/config.json`);
         console.log("");
 
-        // --- SimpleFIN ---------------------------------------------------------------
         let accessUrl = process.env.SIMPLEFIN_ACCESS_URL ?? "";
 
         if (accessUrl) {
@@ -118,7 +123,6 @@ export const setup = async (options: SetupOptions = {}): Promise<void> => {
             }
         }
 
-        // --- YNAB token --------------------------------------------------------------
         let ynabToken = process.env.YNAB_API_TOKEN ?? "";
 
         if (ynabToken) {
@@ -133,13 +137,11 @@ export const setup = async (options: SetupOptions = {}): Promise<void> => {
             if (ynabToken === "") throw new Error("A YNAB API token is required.");
         }
 
-        // --- Budget ------------------------------------------------------------------
         const api = new API(ynabToken);
         const config: Config = readConfig();
 
         info("Fetching your YNAB budgets...");
-        // ynab v4 renamed the "budgets" API group to "plans" (matching YNAB's own rename);
-        // budgets and plans are the same thing, and we keep "budget" in the user-facing wording.
+        // ynab v4 renamed the "budgets" API group to "plans".
         const { data } = await api.plans.getPlans();
         const budgets = data.plans;
 
@@ -172,7 +174,6 @@ export const setup = async (options: SetupOptions = {}): Promise<void> => {
         writeConfig(config);
         info(`Saved budget id to ${dirname(envPath)}/config.json`);
 
-        // --- Secrets -----------------------------------------------------------------
         console.log("");
         const save = await confirm(rl, `Save your token and Access URL to ${envPath}?`);
 
@@ -189,7 +190,6 @@ export const setup = async (options: SetupOptions = {}): Promise<void> => {
             console.log(`  export YNAB_API_TOKEN=${shellQuote(ynabToken)}`);
         }
 
-        // Make the rest of this process see them regardless of where they were stored.
         process.env.SIMPLEFIN_ACCESS_URL = accessUrl;
         process.env.YNAB_API_TOKEN = ynabToken;
         process.env.YNAB_BUDGET_ID = budgetId;
@@ -200,14 +200,13 @@ export const setup = async (options: SetupOptions = {}): Promise<void> => {
             return;
         }
 
-        // --- Mappings ----------------------------------------------------------------
         console.log("");
         info("Now let's map your accounts.");
     } finally {
         rl.close();
     }
 
-    // link opens its own readline, so this must run after the one above is closed.
+    // link and selectArchive open their own readline, so they run after the one above is closed.
     await link({
         accessUrl: process.env.SIMPLEFIN_ACCESS_URL!,
         ynabToken: process.env.YNAB_API_TOKEN!,
@@ -215,6 +214,14 @@ export const setup = async (options: SetupOptions = {}): Promise<void> => {
     });
 
     console.log("");
-    info("Setup complete. Check what would happen before writing anything:");
+    const wantsArchive = /^y(es)?$/i.test(
+        await askOnce("Archive full transaction history for some accounts? Optional, off by default. [y/N] "),
+    );
+    if (wantsArchive) {
+        await selectArchive({ accessUrl: process.env.SIMPLEFIN_ACCESS_URL! });
+    }
+
+    console.log("");
+    info("Setup complete. Preview before writing anything:");
     console.log("  ynab-simplefin-sync sync --dry-run");
 };
