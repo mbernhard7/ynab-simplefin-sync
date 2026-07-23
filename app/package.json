@@ -1,0 +1,13 @@
+{
+  "name": "ynab-simplefin-app",
+  "private": true,
+  "type": "module",
+  "description": "Onboarding web app: provisions a user-owned GitHub repo that runs ynab-simplefin-sync on a schedule.",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "test": "node --test"
+  }
+}

@@ -1,0 +1,108 @@
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>YNAB SimpleFIN Sync</title>
+    <link rel="stylesheet" href="/style.css">
+    <script src="/vendor/libsodium.js" defer></script>
+    <script src="/vendor/libsodium-wrappers.js" defer></script>
+    <script type="module" src="/app.js"></script>
+</head>
+<body>
+<main>
+    <header>
+        <h1>YNAB ↔ SimpleFIN Sync</h1>
+        <p class="tagline">
+            Automatic balance syncing that runs in <strong>your</strong> GitHub account.
+            Your credentials are sealed in your browser and stored only as encrypted secrets
+            in a repository you own — this site never sees or stores them.
+        </p>
+    </header>
+
+    <!-- Step 1: GitHub -->
+    <section id="step-github" class="step">
+        <h2><span class="num">1</span> Connect GitHub</h2>
+        <p>The sync runs as a scheduled GitHub Actions workflow in a private repository
+           created in your account.</p>
+        <div class="row">
+            <a class="button" href="/login" id="github-connect">Connect GitHub</a>
+            <span class="status" id="github-status"></span>
+        </div>
+    </section>
+
+    <!-- Step 2: SimpleFIN -->
+    <section id="step-simplefin" class="step locked">
+        <h2><span class="num">2</span> Connect SimpleFIN</h2>
+        <p>Get a Setup Token from
+           <a href="https://beta-bridge.simplefin.org" target="_blank" rel="noreferrer">SimpleFIN Bridge</a>
+           (Settings → New App), or paste an Access URL you already have. Setup tokens are
+           single-use; claiming happens now and the resulting credential goes only into your
+           repository's encrypted secrets.</p>
+        <div class="row">
+            <input type="password" id="simplefin-input" placeholder="Setup Token or Access URL" autocomplete="off">
+            <button id="simplefin-verify">Verify</button>
+        </div>
+        <p class="status" id="simplefin-status"></p>
+    </section>
+
+    <!-- Step 3: YNAB -->
+    <section id="step-ynab" class="step locked">
+        <h2><span class="num">3</span> Connect YNAB</h2>
+        <p>Create a Personal Access Token in YNAB under
+           <a href="https://app.ynab.com/settings/developer" target="_blank" rel="noreferrer">Settings → Developer Settings</a>.
+           Your browser talks to YNAB directly — the token never touches this server.</p>
+        <div class="row">
+            <input type="password" id="ynab-input" placeholder="YNAB Personal Access Token" autocomplete="off">
+            <button id="ynab-verify">Verify</button>
+        </div>
+        <div class="row hidden" id="budget-row">
+            <label for="budget-select">Budget:</label>
+            <select id="budget-select"></select>
+        </div>
+        <p class="status" id="ynab-status"></p>
+    </section>
+
+    <!-- Step 4: Mapping -->
+    <section id="step-map" class="step locked">
+        <h2><span class="num">4</span> Map accounts</h2>
+        <p>Pick which SimpleFIN account(s) feed each YNAB account. Select more than one to sum
+           them (for example an HSA's cash and investment sides). Leave an account unchecked to
+           skip it.</p>
+        <div id="mapping-list"></div>
+        <p class="status" id="map-status"></p>
+    </section>
+
+    <!-- Step 5: Create -->
+    <section id="step-create" class="step locked">
+        <h2><span class="num">5</span> Create your sync repository</h2>
+        <p>This creates a private repository, adds the workflow, and seals your credentials
+           into its encrypted Actions secrets — all from this browser.</p>
+        <div class="row">
+            <input type="text" id="repo-name" value="ynab-simplefin-sync" spellcheck="false">
+            <button id="create-button">Create</button>
+        </div>
+        <pre id="create-log" class="hidden"></pre>
+        <div id="done-panel" class="hidden">
+            <h3>Done ✓</h3>
+            <p>A dry run has been started so you can see the plan with nothing written.</p>
+            <ul>
+                <li><a id="done-actions" target="_blank" rel="noreferrer">View workflow runs</a></li>
+                <li><a id="done-repo" target="_blank" rel="noreferrer">View the repository</a></li>
+            </ul>
+            <p><strong>First real run:</strong> the initial catch-up adjustment may trip the
+               large-adjustment safety guard. Check the numbers in the dry-run log, then run the
+               workflow once with <code>force</code> checked. After that it runs itself.</p>
+        </div>
+    </section>
+
+    <footer>
+        <p>Credentials are sealed with libsodium in your browser and written directly to your
+           repository's encrypted secrets. SimpleFIN requests are relayed through this server
+           (SimpleFIN doesn't allow browser calls) but are never stored or logged.
+           <a href="https://github.com/mbernhard7/ynab-simplefin-sync">Source</a>.</p>
+        <p>Not affiliated with YNAB or SimpleFIN.</p>
+    </footer>
+</main>
+</body>
+</html>
