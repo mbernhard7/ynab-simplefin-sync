@@ -57,6 +57,35 @@ export interface ApplyResult {
  * balance, which already includes any earlier adjustment from today — so amending means adding
  * the delta to the existing amount, not replacing it.
  */
+/**
+ * Turn whatever the ynab SDK throws into a legible message. On a non-2xx response it throws a
+ * ResponseError carrying the raw HTTP Response, whose own `.message` is only a generic "Response
+ * returned an error code" — and a bare object stringifies to a useless "[object Object]". Read
+ * the status and YNAB's structured `error.detail` out of the body so a failure says what went
+ * wrong (a 429 rate-limit, a 400 validation error, a 409 duplicate import_id, ...).
+ */
+export const describeApiError = async (err: unknown): Promise<string> => {
+    const response = (err as { response?: Response } | null)?.response;
+    if (response && typeof response.status === "number") {
+        let detail = "";
+        try {
+            const body = (await response.clone().json()) as { error?: { name?: string; detail?: string; id?: string } };
+            detail = body.error?.detail ?? body.error?.name ?? body.error?.id ?? "";
+        } catch {
+            // Body was empty or not JSON; the status alone still beats "[object Object]".
+        }
+        return `YNAB API ${response.status} ${response.statusText}${detail ? `: ${detail}` : ""}`.trim();
+    }
+
+    if (err instanceof Error) return err.message;
+    if (typeof err === "string") return err;
+    try {
+        return JSON.stringify(err);
+    } catch {
+        return String(err);
+    }
+};
+
 export const applyPlan = async (api: API, budgetId: string, plan: AccountPlan): Promise<ApplyResult> => {
     if (plan.action !== "adjust" || plan.deltaMilliunits === undefined || !plan.importId || !plan.date) {
         throw new Error(`applyPlan called with a non-adjustable plan for ${plan.ynabAccountName}`);
@@ -102,7 +131,7 @@ export const applyPlan = async (api: API, budgetId: string, plan: AccountPlan): 
         await api.transactions.createTransaction(budgetId, { transaction });
         return { plan, outcome: "created" };
     } catch (err) {
-        return { plan, outcome: "failed", error: err instanceof Error ? err.message : String(err) };
+        return { plan, outcome: "failed", error: await describeApiError(err) };
     }
 };
 
