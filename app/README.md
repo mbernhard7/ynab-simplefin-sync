@@ -24,7 +24,10 @@ inactivity timer each run, so no PAT is ever needed.
 - `server.js` — zero-dependency Node server: static frontend, GitHub OAuth code exchange,
   stateless SimpleFIN relay (host-allowlisted), one-time GitHub App manifest setup.
 - `public/app.js` — the wizard. All GitHub/YNAB API calls run client-side.
-- `public/templates.js` — the workflow + README provisioned into user repos.
+- `public/templates.js` — the workflow + README provisioned into user repos. The workflow
+  includes optional Slack notifications and same-repo transaction archiving; both are offered
+  in the wizard and no-op unless their secret exists, so they can be toggled later by adding
+  or removing the secret.
 - `public/vendor/` — libsodium-wrappers `0.7.15`, vendored from npm
   (`libsodium.js` sha256 `0a66b0fd…`, `libsodium-wrappers.js` sha256 `82888473…`).
 
