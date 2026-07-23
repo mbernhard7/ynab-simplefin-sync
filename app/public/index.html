@@ -86,6 +86,25 @@
             <li>Then continue here — the workflow is added and your credentials are sealed into
                 the repository's encrypted Actions secrets, all from this browser.</li>
         </ol>
+
+        <details id="extras">
+            <summary>Optional: Slack notifications &amp; transaction archive</summary>
+            <div class="extra">
+                <label for="slack-input">Slack incoming webhook — one message per run (a single
+                line when nothing changed, the full log when a balance moves or a run fails):</label>
+                <input type="password" id="slack-input" placeholder="https://hooks.slack.com/services/… (optional)" autocomplete="off">
+            </div>
+            <div class="extra">
+                <p>Archive account history: each selected account's raw SimpleFIN data —
+                including its full transaction history — is saved as JSON into the repository
+                whenever SimpleFIN refreshes it. SimpleFIN only serves a rolling 90-day window,
+                so unarchived history is eventually unrecoverable.</p>
+                <div id="archive-list"></div>
+            </div>
+            <p class="hint">Both can be enabled, changed, or disabled later by editing the
+               repository's Actions secrets — the workflow adapts automatically.</p>
+        </details>
+
         <div class="row">
             <input type="text" id="repo-name" value="ynab-simplefin-sync-job" spellcheck="false">
             <button id="create-button">Set up sync</button>

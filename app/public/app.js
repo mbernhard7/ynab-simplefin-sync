@@ -140,10 +140,49 @@ const verifySimplefin = async () => {
         state.accessUrl = accessUrl;
         state.simplefinAccounts = data.accounts;
         setStatus("simplefin-status", `Found ${data.accounts.length} account(s) ✓`, "ok");
+        renderArchiveOptions();
         unlock("step-ynab");
     } catch (err) {
         setStatus("simplefin-status", err.message, "error");
     }
+};
+
+// --- Optional extras -------------------------------------------------------------------
+
+const renderArchiveOptions = () => {
+    const container = $("archive-list");
+
+    const allLabel = document.createElement("label");
+    const allBox = document.createElement("input");
+    allBox.type = "checkbox";
+    allBox.id = "archive-all";
+    allLabel.append(allBox, " All accounts, including ones you connect later");
+
+    const perAccount = state.simplefinAccounts.map((sf) => {
+        const label = document.createElement("label");
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.dataset.archive = sf.id;
+        const org = sf.org?.name ?? sf.org?.domain ?? "?";
+        label.append(box, ` ${org} · ${sf.name}`);
+        return label;
+    });
+
+    allBox.addEventListener("change", () => {
+        for (const box of container.querySelectorAll("input[data-archive]")) {
+            box.disabled = allBox.checked;
+        }
+    });
+
+    container.replaceChildren(allLabel, ...perAccount);
+};
+
+/** `'all'`, a `;`-joined id list, or `''` for no archiving. */
+const archiveSelection = () => {
+    if ($("archive-all")?.checked) return "all";
+    return [...document.querySelectorAll("#archive-list input[data-archive]:checked")]
+        .map((box) => box.dataset.archive)
+        .join(";");
 };
 
 // --- Step 3: YNAB ----------------------------------------------------------------------
@@ -288,9 +327,14 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const provision = async () => {
     const repo = $("repo-name").value.trim();
     const mappings = currentMappings();
+    const slackWebhook = $("slack-input").value.trim();
+    const archiveAccounts = archiveSelection();
 
     if (!/^[A-Za-z0-9._-]+$/.test(repo)) return setStatus("map-status", "Invalid repository name.", "error");
     if (mappings.length === 0) return setStatus("map-status", "Map at least one account first.", "error");
+    if (slackWebhook && !slackWebhook.startsWith("https://hooks.slack.com/")) {
+        return setStatus("map-status", "Slack webhook should start with https://hooks.slack.com/ — or leave it empty.", "error");
+    }
 
     $("create-button").disabled = true;
     $("create-log").textContent = "";
@@ -320,15 +364,20 @@ const provision = async () => {
 
         log("Sealing secrets in this browser…");
         const keyData = await gh(`/repos/${state.ghLogin}/${repo}/actions/secrets/public-key`);
-        for (const [name, value] of [
+        const secrets = [
             ["SIMPLEFIN_ACCESS_URL", state.accessUrl],
             ["YNAB_API_TOKEN", state.ynabToken],
             ["YNAB_BUDGET_ID", state.budgetId],
             ["SIMPLEFIN_MAP", buildMapValue(mappings)],
-        ]) {
+            ...(slackWebhook ? [["SLACK_WEBHOOK_URL", slackWebhook]] : []),
+            ...(archiveAccounts ? [["SIMPLEFIN_ARCHIVE_ACCOUNTS", archiveAccounts]] : []),
+        ];
+        for (const [name, value] of secrets) {
             await putSecret(repo, keyData, name, value);
             log(`  ${name} ✓`);
         }
+        if (!slackWebhook) log("  (Slack notifications off — add a SLACK_WEBHOOK_URL secret to enable)");
+        if (!archiveAccounts) log("  (archiving off — add a SIMPLEFIN_ARCHIVE_ACCOUNTS secret to enable)");
 
         log("Starting a dry run…");
         let dispatched = false;

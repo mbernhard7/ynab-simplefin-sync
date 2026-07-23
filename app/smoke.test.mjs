@@ -11,23 +11,40 @@ test("workflow template pins the schedule and the package major", () => {
     assert.match(yaml, /npx ynab-simplefin-sync@3 sync/);
     assert.match(yaml, /workflow_dispatch:/);
     assert.match(yaml, /actions: write/);
+    assert.match(yaml, /contents: write/);
     assert.match(yaml, /workflows\/sync\.yml\/enable/);
     assert.ok(!yaml.includes("\t"), "workflow must not contain tabs");
 });
 
-test("workflow references exactly the four provisioned secrets", () => {
+test("workflow references exactly the provisioned and optional secrets", () => {
     const yaml = syncWorkflowYaml();
     const secrets = [...yaml.matchAll(/secrets\.([A-Z_]+)/g)].map((m) => m[1]);
     assert.deepEqual(
         [...new Set(secrets)].sort(),
-        ["GITHUB_TOKEN", "SIMPLEFIN_ACCESS_URL", "SIMPLEFIN_MAP", "YNAB_API_TOKEN", "YNAB_BUDGET_ID"],
+        [
+            "GITHUB_TOKEN",
+            "SIMPLEFIN_ACCESS_URL",
+            "SIMPLEFIN_ARCHIVE_ACCOUNTS",
+            "SIMPLEFIN_MAP",
+            "SLACK_WEBHOOK_URL",
+            "YNAB_API_TOKEN",
+            "YNAB_BUDGET_ID",
+        ],
     );
 });
 
-test("readme names the budget and the secrets", () => {
+test("optional steps guard on their secret so they no-op when unset", () => {
+    const yaml = syncWorkflowYaml();
+    assert.match(yaml, /if \[ -z "\$ARCHIVING" \]/);
+    assert.match(yaml, /if \[ -z "\$SLACK_WEBHOOK_URL" \]; then exit 0; fi/);
+});
+
+test("readme names the budget, the secrets, and the optional features", () => {
     const md = repoReadme("My Budget");
     assert.match(md, /\*\*My Budget\*\*/);
     assert.match(md, /SIMPLEFIN_MAP/);
+    assert.match(md, /SLACK_WEBHOOK_URL/);
+    assert.match(md, /SIMPLEFIN_ARCHIVE_ACCOUNTS/);
 });
 
 test("buildMapValue formats and skips unmapped accounts", () => {
