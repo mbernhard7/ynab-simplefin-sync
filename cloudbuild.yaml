@@ -1,0 +1,23 @@
+# Continuous deployment for the onboarding app (app/) to Cloud Run.
+# Attached to a Cloud Build trigger on pushes to main. Deploying by image only:
+# the service's existing env vars (BASE_URL, GITHUB_*) carry over to each new revision.
+
+steps:
+  - name: gcr.io/cloud-builders/docker
+    args: ["build", "-t", "${_IMAGE}", "app"]
+
+  - name: gcr.io/cloud-builders/docker
+    args: ["push", "${_IMAGE}"]
+
+  - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
+    entrypoint: gcloud
+    args: ["run", "deploy", "${_SERVICE}", "--image", "${_IMAGE}", "--region", "${_REGION}", "--quiet"]
+
+substitutions:
+  _SERVICE: ynab-simplefin-app
+  _REGION: us-east1
+  # Reuses the Artifact Registry repo created by the first `gcloud run deploy --source`.
+  _IMAGE: us-east1-docker.pkg.dev/${PROJECT_ID}/cloud-run-source-deploy/ynab-simplefin-app:${COMMIT_SHA}
+
+images:
+  - "${_IMAGE}"

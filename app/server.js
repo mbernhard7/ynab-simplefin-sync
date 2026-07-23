@@ -106,6 +106,20 @@ const parseCookies = (header = "") =>
             .filter((p) => p.length === 2),
     );
 
+/**
+ * Client IP behind Cloud Run's proxy. Google appends the IP it observed as the LAST entry of
+ * X-Forwarded-For, so that entry is trustworthy; anything earlier is client-supplied. Falls
+ * back to the socket address for local development.
+ */
+export const clientIp = (req) => {
+    const xff = req.headers["x-forwarded-for"];
+    if (typeof xff === "string" && xff.trim() !== "") {
+        const parts = xff.split(",").map((p) => p.trim()).filter(Boolean);
+        if (parts.length > 0) return parts[parts.length - 1];
+    }
+    return req.socket.remoteAddress ?? "unknown";
+};
+
 /** Naive fixed-window rate limiter, per IP, for the relay endpoints. */
 const makeRateLimiter = (max = 30, windowMs = 60_000) => {
     const hits = new Map();
@@ -269,8 +283,9 @@ export const createApp = (config = defaultConfig()) => {
         callback_urls: [`${config.baseUrl}/callback`],
         request_oauth_on_install: true,
         public: true,
+        // No administration permission: the user creates the repo themselves and installs the
+        // app on just that repo, so the grant is scoped to a single repository they picked.
         default_permissions: {
-            administration: "write",
             contents: "write",
             workflows: "write",
             secrets: "write",
@@ -348,8 +363,7 @@ GITHUB_APP_SLUG=${escapeHtml(app.slug)}</pre>
             if (route === "GET /callback") return await callback(req, res, url);
 
             if (url.pathname.startsWith("/api/")) {
-                const ip = req.socket.remoteAddress ?? "unknown";
-                if (!allowRate(ip)) return sendJson(res, 429, { error: "Slow down." });
+                if (!allowRate(clientIp(req))) return sendJson(res, 429, { error: "Slow down." });
                 if (route === "POST /api/claim") return await claim(req, res);
                 if (route === "POST /api/simplefin/accounts") return await simplefinAccounts(req, res);
                 return sendJson(res, 404, { error: "not found" });
