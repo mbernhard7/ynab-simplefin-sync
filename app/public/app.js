@@ -331,8 +331,7 @@ const provision = async () => {
         }
 
         log("Adding workflow…");
-        const minute = crypto.getRandomValues(new Uint32Array(1))[0] % 60;
-        await putFile(repo, ".github/workflows/sync.yml", syncWorkflowYaml(minute), "Add sync workflow");
+        await putFile(repo, ".github/workflows/sync.yml", syncWorkflowYaml(), "Add sync workflow");
 
         log("Writing README…");
         await putFile(repo, "README.md", repoReadme(state.budgetName), "Configure sync");
