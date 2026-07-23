@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApp } from "./server.js";
+import { clientIp, createApp } from "./server.js";
 import { syncWorkflowYaml, repoReadme, buildMapValue } from "./public/templates.js";
 
 // --- Templates -------------------------------------------------------------------------
@@ -39,6 +39,19 @@ test("buildMapValue formats and skips unmapped accounts", () => {
         ]),
         "y1=ACT-1+ACT-2;y3=ACT-3",
     );
+});
+
+test("clientIp trusts only the proxy-appended X-Forwarded-For entry", () => {
+    const req = (xff, socketAddr = "10.0.0.1") => ({
+        headers: xff === undefined ? {} : { "x-forwarded-for": xff },
+        socket: { remoteAddress: socketAddr },
+    });
+
+    // Cloud Run appends the observed client IP last; earlier entries are client-supplied.
+    assert.equal(clientIp(req("203.0.113.9")), "203.0.113.9");
+    assert.equal(clientIp(req("spoofed.example, 203.0.113.9")), "203.0.113.9");
+    assert.equal(clientIp(req(undefined)), "10.0.0.1");
+    assert.equal(clientIp(req("  ")), "10.0.0.1");
 });
 
 // --- Server ----------------------------------------------------------------------------
@@ -135,11 +148,16 @@ test("server routes", async (t) => {
     });
 });
 
-test("setup page is reachable when unconfigured", async (t) => {
+test("setup page is reachable when unconfigured and requests narrow permissions", async (t) => {
     const { server, base } = await startServer({ clientId: "" });
     t.after(() => server.close());
 
     const res = await fetch(`${base}/setup`);
     assert.equal(res.status, 200);
-    assert.match(await res.text(), /settings\/apps\/new/);
+    const html = await res.text();
+    assert.match(html, /settings\/apps\/new/);
+    // Manifest is JSON.stringify'd then HTML-escaped into the form value.
+    assert.match(html, /&quot;contents&quot;:&quot;write&quot;/);
+    assert.match(html, /&quot;secrets&quot;:&quot;write&quot;/);
+    assert.ok(!html.includes("administration"), "manifest must not request administration");
 });

@@ -75,12 +75,20 @@
 
     <!-- Step 5: Create -->
     <section id="step-create" class="step locked">
-        <h2><span class="num">5</span> Create your sync repository</h2>
-        <p>This creates a private repository, adds the workflow, and seals your credentials
-           into its encrypted Actions secrets — all from this browser.</p>
+        <h2><span class="num">5</span> Set up your sync repository</h2>
+        <p>The sync lives in a repository you create and control. This app only ever gets access
+           to that one repository — nothing else in your account.</p>
+        <ol class="substeps">
+            <li><a id="new-repo-link" href="https://github.com/new?name=ynab-simplefin-sync" target="_blank" rel="noreferrer">Create a private repository</a>
+                named to match the field below (check “Add a README”).</li>
+            <li><a id="install-link" href="https://github.com/settings/installations" target="_blank" rel="noreferrer">Install this app</a>
+                and choose <strong>Only select repositories → your new repository</strong>.</li>
+            <li>Then continue here — the workflow is added and your credentials are sealed into
+                the repository's encrypted Actions secrets, all from this browser.</li>
+        </ol>
         <div class="row">
             <input type="text" id="repo-name" value="ynab-simplefin-sync" spellcheck="false">
-            <button id="create-button">Create</button>
+            <button id="create-button">Set up sync</button>
         </div>
         <pre id="create-log" class="hidden"></pre>
         <div id="done-panel" class="hidden">

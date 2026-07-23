@@ -11,7 +11,7 @@ The server never stores credentials, and never sees most of them:
 | Credential | Path |
 |---|---|
 | YNAB token | Browser → YNAB API and browser → sealed repo secret. Never touches this server. |
-| GitHub token | Short-lived OAuth user token; exchanged by the server, delivered to the browser in a URL fragment, held in `sessionStorage`. Never stored. |
+| GitHub token | Short-lived OAuth user token; exchanged by the server, delivered to the browser in a URL fragment, held in `sessionStorage`. Never stored. Scoped to the single repository the user installed the app on. |
 | SimpleFIN access URL | Relayed through this server per request (the Bridge sends no CORS headers), never stored or logged. Stored only as the repo's sealed secret. |
 
 Secrets are sealed in the browser with libsodium (`crypto_box_seal`) against the repository's
@@ -36,9 +36,10 @@ inactivity timer each run, so no PAT is ever needed.
 2. Set those as environment variables and redeploy. `/setup` disables itself once a client id
    is configured.
 
-The app requests repository permissions: Administration (write), Contents (write), Workflows
-(write), Secrets (write), Metadata (read). Users should install it with **All repositories**
-so the repo the wizard creates is covered.
+The app requests repository permissions: Contents (write), Workflows (write), Secrets (write),
+Metadata (read) — no administration access. Users create the sync repository themselves and
+install the app with **Only select repositories**, scoped to that single repo, so the grant
+never extends past the one repository they picked.
 
 ## Environment
 

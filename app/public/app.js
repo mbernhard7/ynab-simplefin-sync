@@ -298,36 +298,18 @@ const provision = async () => {
     try {
         await sodium.ready;
 
-        log(`Creating private repository ${state.ghLogin}/${repo}…`);
+        log(`Checking access to ${state.ghLogin}/${repo}…`);
         try {
-            await gh("/user/repos", {
-                method: "POST",
-                body: JSON.stringify({
-                    name: repo,
-                    private: true,
-                    description: "Automated YNAB ↔ SimpleFIN balance sync",
-                    auto_init: true,
-                }),
-            });
-            log("  created ✓");
-            await sleep(1500); // let auto-init land before the contents API writes
+            await gh(`/repos/${state.ghLogin}/${repo}`);
+            log("  accessible ✓");
         } catch (err) {
-            if (err.status === 422 && /already exists/i.test(err.message)) {
-                if (!confirm(`Repository "${repo}" already exists. Update it in place (workflow + secrets)?`)) {
-                    throw new Error("Cancelled.");
-                }
-                log("  exists — updating in place");
-            } else if (err.status === 403 || err.status === 404) {
-                const install = state.appSlug
-                    ? `https://github.com/apps/${state.appSlug}/installations/new`
-                    : "https://github.com/settings/installations";
-                window.open(install, "_blank");
+            if (err.status === 404 || err.status === 403) {
                 throw new Error(
-                    "GitHub denied repository access. Install the app on your account (choose “All repositories”), then click Create again.",
+                    `Can't access ${state.ghLogin}/${repo}. Create the repository (step 1 link), ` +
+                    "then install this app on it (step 2 link, “Only select repositories”), then try again.",
                 );
-            } else {
-                throw err;
             }
+            throw err;
         }
 
         log("Adding workflow…");
@@ -381,6 +363,13 @@ const init = async () => {
     } catch {
         // non-fatal
     }
+
+    if (state.appSlug) {
+        $("install-link").href = `https://github.com/apps/${state.appSlug}/installations/new`;
+    }
+    $("repo-name").addEventListener("input", () => {
+        $("new-repo-link").href = `https://github.com/new?name=${encodeURIComponent($("repo-name").value.trim())}`;
+    });
 
     $("simplefin-verify").addEventListener("click", verifySimplefin);
     $("ynab-verify").addEventListener("click", verifyYnab);
