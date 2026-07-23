@@ -1,6 +1,6 @@
 {
   "name": "ynab-simplefin-sync",
-  "version": "2.3.0",
+  "version": "2.4.0",
   "description": "Reconcile YNAB investment account balances against SimpleFIN Bridge. Successor to ynab_investment_tracking.",
   "author": "Miles Bernhard <me@milesbernhard.com>",
   "license": "MIT",
