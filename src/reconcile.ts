@@ -20,7 +20,8 @@ export type SkipReason =
     | "connection-error"
     | "non-usd"
     | "unparseable-balance"
-    | "exceeds-threshold";
+    | "exceeds-threshold"
+    | "ynab-ahead";
 
 export interface AccountPlan {
     ynabAccountId: string;
@@ -48,6 +49,12 @@ export interface ReconcileOptions {
      * `resolveMappings` in ./mapping layers notes over the config file and SIMPLEFIN_MAP.
      */
     mappings?: { ynabAccountId: string; simplefinIds: string[] }[];
+    /**
+     * Most recent real (non-adjustment) YNAB transaction date per account, as `YYYY-MM-DD`.
+     * When an account's newest activity is later than SimpleFIN's balance-date, SimpleFIN has
+     * not yet caught up and reconciling would revert that activity — so the account is skipped.
+     */
+    lastActivityByAccount?: Map<string, string>;
     now?: Date;
     /** Flag a balance as stale past this age. Stale balances are still reconciled. */
     staleAfterHours?: number;
@@ -82,9 +89,12 @@ export const parseNote = (note?: string | null): string[] => {
         .filter((id) => id.length > 0);
 };
 
+/** Prefix on every import_id this tool assigns to its own balance adjustments. */
+export const ADJUSTMENT_IMPORT_ID_PREFIX = "SFIN:";
+
 /** YNAB caps import_id at 36 characters, so the account uuid is hashed down to 8. */
 export const buildImportId = (ynabAccountId: string, date: string): string =>
-    `SFIN:${createHash("sha256").update(ynabAccountId).digest("hex").slice(0, 8)}:${date}`;
+    `${ADJUSTMENT_IMPORT_ID_PREFIX}${createHash("sha256").update(ynabAccountId).digest("hex").slice(0, 8)}:${date}`;
 
 /** Local-time YYYY-MM-DD; YNAB dates are calendar dates, not instants. */
 export const localDate = (now: Date): string =>
@@ -192,6 +202,29 @@ export const reconcile = (
         if (delta === 0) {
             plans.push({ ...base, action: "noop", targetMilliunits: target, deltaMilliunits: 0, balanceDate, stale });
             continue;
+        }
+
+        // SimpleFIN can lag YNAB: an institution has not refreshed since a transaction was added
+        // in YNAB. Reconciling then would revert that transaction, so skip until SimpleFIN's
+        // balance-date catches up. Compared at day granularity — YNAB dates carry no time.
+        const lastActivity = options.lastActivityByAccount?.get(ynabAccount.id);
+        if (!options.force && lastActivity !== undefined && balanceDate !== undefined) {
+            const balanceDay = localDate(balanceDate);
+            if (lastActivity > balanceDay) {
+                plans.push({
+                    ...base,
+                    action: "skip",
+                    reason: "ynab-ahead",
+                    detail:
+                        `YNAB has activity on ${lastActivity}, newer than SimpleFIN's balance as of ` +
+                        `${balanceDay}; skipping until SimpleFIN catches up`,
+                    targetMilliunits: target,
+                    deltaMilliunits: delta,
+                    balanceDate,
+                    stale,
+                });
+                continue;
+            }
         }
 
         // Guards against an institution briefly reporting a partial or zeroed balance.

@@ -235,6 +235,11 @@ A sync that goes wrong silently rewrites your net worth, so:
 - **Large adjustments are refused.** Any single delta above `max($25,000, 40% of the account
   balance)` is blocked pending `--force`. This catches an institution briefly reporting a partial
   or zeroed balance.
+- **SimpleFIN lag never reverts YNAB.** If an account's newest YNAB transaction is dated later
+  than SimpleFIN's `balance-date`, the institution has not refreshed since that transaction was
+  added, and reconciling would undo it. The account is skipped (`ynab-ahead`) and logged, not
+  reconciled, until SimpleFIN catches up. The tool's own balance adjustments are excluded from
+  this check, and `--force` overrides it. This skip is informational — it does not turn a run red.
 - **Stale balances are flagged, not blocked.** Past 36 hours the memo is prefixed `STALE`; the
   last known balance is still the best available truth.
 - **Non-USD and unparseable balances are skipped.**

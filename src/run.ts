@@ -1,7 +1,7 @@
 import { API } from "ynab";
 import { getAccounts as getSimpleFinAccounts } from "./simplefin";
-import { reconcile, type AccountPlan, type ReconcileOptions } from "./reconcile";
-import { applyPlans, getAccounts as getYnabAccounts } from "./ynab";
+import { localDate, reconcile, type AccountPlan, type ReconcileOptions } from "./reconcile";
+import { applyPlans, getAccounts as getYnabAccounts, getLastActivityByAccount } from "./ynab";
 import { readConfig, resolveArchiveAccounts, resolveMappings } from "./config";
 import { writeSnapshot } from "./archive";
 import { MAX_WINDOW_DAYS } from "./simplefin";
@@ -110,7 +110,26 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
         }
     }
 
-    const plans = reconcile(mapped, accountSet, { ...options, mappings });
+    // SimpleFIN sometimes lags YNAB — the institution hasn't refreshed since a transaction was
+    // added in YNAB. Reconciling then would revert that transaction, so fetch each mapped
+    // account's most recent activity and let reconcile skip any account YNAB is ahead of. The
+    // lookback starts at the oldest mapped balance-date so even a stale account is covered.
+    let lastActivityByAccount: Map<string, string> | undefined;
+    const mappedSimplefinIds = new Set(mappings.flatMap((m) => m.simplefinIds));
+    const balanceDates = accountSet.accounts
+        .filter((a) => mappedSimplefinIds.has(a.id))
+        .map((a) => a["balance-date"]);
+
+    if (balanceDates.length > 0) {
+        const since = localDate(new Date(Math.min(...balanceDates) * 1000));
+        try {
+            lastActivityByAccount = await getLastActivityByAccount(api, options.budgetId, since);
+        } catch (err) {
+            warn(`Could not read YNAB transactions for the SimpleFIN-lag guard: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+
+    const plans = reconcile(mapped, accountSet, { ...options, mappings, lastActivityByAccount });
 
     info("Plan:");
     for (const plan of plans) {
@@ -118,8 +137,10 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
     }
 
     const adjustments = plans.filter((p) => p.action === "adjust");
+    // "account-closed" is intentional configuration, and "ynab-ahead" is a transient timing skip
+    // that resolves itself once SimpleFIN refreshes — neither should turn the run red.
     const blocked = plans.filter(
-        (p) => p.action === "skip" && p.reason !== "account-closed",
+        (p) => p.action === "skip" && p.reason !== "account-closed" && p.reason !== "ynab-ahead",
     ).length;
 
     if (options.dryRun) {

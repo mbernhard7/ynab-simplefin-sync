@@ -1,5 +1,5 @@
 import { API, NewTransaction, TransactionClearedStatus, TransactionFlagColor } from "ynab";
-import type { AccountPlan, YnabAccountLike } from "./reconcile";
+import { ADJUSTMENT_IMPORT_ID_PREFIX, type AccountPlan, type YnabAccountLike } from "./reconcile";
 import { detail, info, warn } from "./log";
 
 export const PAYEE_NAME = "Balance Adjustment";
@@ -14,6 +14,31 @@ export const getAccounts = async (api: API, budgetId: string): Promise<YnabAccou
         closed: a.closed,
         deleted: a.deleted,
     }));
+};
+
+/**
+ * Most recent real transaction date per account, as `YYYY-MM-DD`, for transactions on or after
+ * `sinceDate`. This tool's own balance adjustments are excluded by their `import_id` prefix — a
+ * fresh adjustment must not make an account look like it has activity newer than SimpleFIN on
+ * the next run, which would make the account skip itself forever.
+ */
+export const getLastActivityByAccount = async (
+    api: API,
+    budgetId: string,
+    sinceDate: string,
+): Promise<Map<string, string>> => {
+    const { data } = await api.transactions.getTransactions(budgetId, sinceDate);
+    const latest = new Map<string, string>();
+
+    for (const t of data.transactions) {
+        if (t.deleted) continue;
+        if (t.import_id?.startsWith(ADJUSTMENT_IMPORT_ID_PREFIX)) continue;
+
+        const current = latest.get(t.account_id);
+        if (current === undefined || t.date > current) latest.set(t.account_id, t.date);
+    }
+
+    return latest;
 };
 
 export type ApplyOutcome = "created" | "updated" | "failed";
