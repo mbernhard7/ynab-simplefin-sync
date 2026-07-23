@@ -1,5 +1,5 @@
 import { API, NewTransaction, TransactionClearedStatus, TransactionFlagColor } from "ynab";
-import type { AccountPlan, YnabAccountLike } from "./reconcile";
+import { ADJUSTMENT_IMPORT_ID_PREFIX, type AccountPlan, type YnabAccountLike } from "./reconcile";
 import { detail, info, warn } from "./log";
 
 export const PAYEE_NAME = "Balance Adjustment";
@@ -14,6 +14,31 @@ export const getAccounts = async (api: API, budgetId: string): Promise<YnabAccou
         closed: a.closed,
         deleted: a.deleted,
     }));
+};
+
+/**
+ * Most recent real transaction date per account, as `YYYY-MM-DD`, for transactions on or after
+ * `sinceDate`. This tool's own balance adjustments are excluded by their `import_id` prefix — a
+ * fresh adjustment must not make an account look like it has activity newer than SimpleFIN on
+ * the next run, which would make the account skip itself forever.
+ */
+export const getLastActivityByAccount = async (
+    api: API,
+    budgetId: string,
+    sinceDate: string,
+): Promise<Map<string, string>> => {
+    const { data } = await api.transactions.getTransactions(budgetId, sinceDate);
+    const latest = new Map<string, string>();
+
+    for (const t of data.transactions) {
+        if (t.deleted) continue;
+        if (t.import_id?.startsWith(ADJUSTMENT_IMPORT_ID_PREFIX)) continue;
+
+        const current = latest.get(t.account_id);
+        if (current === undefined || t.date > current) latest.set(t.account_id, t.date);
+    }
+
+    return latest;
 };
 
 export type ApplyOutcome = "created" | "updated" | "failed";
@@ -32,6 +57,35 @@ export interface ApplyResult {
  * balance, which already includes any earlier adjustment from today — so amending means adding
  * the delta to the existing amount, not replacing it.
  */
+/**
+ * Turn whatever the ynab SDK throws into a legible message. On a non-2xx response it throws a
+ * ResponseError carrying the raw HTTP Response, whose own `.message` is only a generic "Response
+ * returned an error code" — and a bare object stringifies to a useless "[object Object]". Read
+ * the status and YNAB's structured `error.detail` out of the body so a failure says what went
+ * wrong (a 429 rate-limit, a 400 validation error, a 409 duplicate import_id, ...).
+ */
+export const describeApiError = async (err: unknown): Promise<string> => {
+    const response = (err as { response?: Response } | null)?.response;
+    if (response && typeof response.status === "number") {
+        let detail = "";
+        try {
+            const body = (await response.clone().json()) as { error?: { name?: string; detail?: string; id?: string } };
+            detail = body.error?.detail ?? body.error?.name ?? body.error?.id ?? "";
+        } catch {
+            // Body was empty or not JSON; the status alone still beats "[object Object]".
+        }
+        return `YNAB API ${response.status} ${response.statusText}${detail ? `: ${detail}` : ""}`.trim();
+    }
+
+    if (err instanceof Error) return err.message;
+    if (typeof err === "string") return err;
+    try {
+        return JSON.stringify(err);
+    } catch {
+        return String(err);
+    }
+};
+
 export const applyPlan = async (api: API, budgetId: string, plan: AccountPlan): Promise<ApplyResult> => {
     if (plan.action !== "adjust" || plan.deltaMilliunits === undefined || !plan.importId || !plan.date) {
         throw new Error(`applyPlan called with a non-adjustable plan for ${plan.ynabAccountName}`);
@@ -77,7 +131,7 @@ export const applyPlan = async (api: API, budgetId: string, plan: AccountPlan): 
         await api.transactions.createTransaction(budgetId, { transaction });
         return { plan, outcome: "created" };
     } catch (err) {
-        return { plan, outcome: "failed", error: err instanceof Error ? err.message : String(err) };
+        return { plan, outcome: "failed", error: await describeApiError(err) };
     }
 };
 

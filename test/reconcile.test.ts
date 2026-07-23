@@ -190,6 +190,50 @@ test("uses the oldest balance-date when several accounts are summed", () => {
     assert.equal(plan?.balanceDate?.getTime(), old * 1000);
 });
 
+test("skips an account whose newest YNAB activity is later than the balance-date", () => {
+    const balanceDate = Math.floor(new Date("2026-07-20T12:00:00Z").getTime() / 1000);
+    const [plan] = reconcile(
+        [ynab()],
+        set([sfAccount({ id: "ACT-1", "balance-date": balanceDate })]),
+        { now: NOW, lastActivityByAccount: new Map([[ynab().id, "2026-07-22"]]) },
+    );
+
+    assert.equal(plan?.action, "skip");
+    assert.equal(plan?.reason, "ynab-ahead");
+    assert.match(plan?.detail ?? "", /2026-07-22/);
+    // The delta is still surfaced so the skip is legible in the log.
+    assert.equal(plan?.deltaMilliunits, 100_000);
+});
+
+test("reconciles when YNAB activity is on or before the balance-date", () => {
+    const balanceDate = Math.floor(new Date("2026-07-22T12:00:00Z").getTime() / 1000);
+
+    const [sameDay] = reconcile(
+        [ynab()],
+        set([sfAccount({ id: "ACT-1", "balance-date": balanceDate })]),
+        { now: NOW, lastActivityByAccount: new Map([[ynab().id, "2026-07-22"]]) },
+    );
+    assert.equal(sameDay?.action, "adjust");
+
+    const [older] = reconcile(
+        [ynab()],
+        set([sfAccount({ id: "ACT-1", "balance-date": balanceDate })]),
+        { now: NOW, lastActivityByAccount: new Map([[ynab().id, "2026-07-19"]]) },
+    );
+    assert.equal(older?.action, "adjust");
+});
+
+test("--force applies even when YNAB is ahead of SimpleFIN", () => {
+    const balanceDate = Math.floor(new Date("2026-07-20T12:00:00Z").getTime() / 1000);
+    const [plan] = reconcile(
+        [ynab()],
+        set([sfAccount({ id: "ACT-1", "balance-date": balanceDate })]),
+        { now: NOW, force: true, lastActivityByAccount: new Map([[ynab().id, "2026-07-22"]]) },
+    );
+
+    assert.equal(plan?.action, "adjust");
+});
+
 test("skips closed, non-USD, and unparseable accounts", () => {
     const [closed] = reconcile([ynab({ closed: true })], set([sfAccount({ id: "ACT-1" })]), { now: NOW });
     assert.equal(closed?.reason, "account-closed");

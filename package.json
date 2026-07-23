@@ -35,10 +35,10 @@
     "investments"
   ],
   "dependencies": {
-    "ynab": "^2.6.0"
+    "ynab": "^4.5.0"
   },
   "devDependencies": {
-    "@types/node": "^20.14.0",
-    "typescript": "^5.5.0"
+    "@types/node": "^22.20.0",
+    "typescript": "^7.0.0"
   }
 }

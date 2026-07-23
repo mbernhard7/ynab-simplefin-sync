@@ -138,8 +138,10 @@ export const setup = async (options: SetupOptions = {}): Promise<void> => {
         const config: Config = readConfig();
 
         info("Fetching your YNAB budgets...");
-        const { data } = await api.budgets.getBudgets();
-        const budgets = data.budgets;
+        // ynab v4 renamed the "budgets" API group to "plans" (matching YNAB's own rename);
+        // budgets and plans are the same thing, and we keep "budget" in the user-facing wording.
+        const { data } = await api.plans.getPlans();
+        const budgets = data.plans;
 
         if (budgets.length === 0) throw new Error("That YNAB token can't see any budgets.");
 
