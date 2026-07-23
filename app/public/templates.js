@@ -1,18 +1,14 @@
 // Templates for the files provisioned into a user's sync repository.
 // Pure module: no DOM, no globals — imported by both the browser app and the tests.
 
-/** Workflow for the generated repo. `minute` staggers schedules across users. */
-export const syncWorkflowYaml = (minute) => {
-    if (!Number.isInteger(minute) || minute < 0 || minute > 59) {
-        throw new Error(`minute must be 0-59, got ${minute}`);
-    }
-
-    return [
+/** Workflow for the generated repo. */
+export const syncWorkflowYaml = () =>
+    [
         "name: YNAB SimpleFIN Sync",
         "",
         "on:",
         "  schedule:",
-        `    - cron: "${minute} */6 * * *"`,
+        '    - cron: "0 */2 * * *"',
         "  workflow_dispatch:",
         "    inputs:",
         "      dry_run:",
@@ -56,7 +52,6 @@ export const syncWorkflowYaml = (minute) => {
         '            "${{ github.api_url }}/repos/${{ github.repository }}/actions/workflows/sync.yml/enable"',
         "",
     ].join("\n");
-};
 
 /** README for the generated repo. */
 export const repoReadme = (budgetName) => [
@@ -70,7 +65,7 @@ export const repoReadme = (budgetName) => [
     "",
     "## How it works",
     "",
-    "Every 6 hours the workflow fetches your SimpleFIN balances and posts one",
+    "Every 2 hours the workflow fetches your SimpleFIN balances and posts one",
     "`Balance Adjustment` per mapped account in YNAB for any difference. Runs are",
     "idempotent: repeated runs the same day amend a single transaction.",
     "",

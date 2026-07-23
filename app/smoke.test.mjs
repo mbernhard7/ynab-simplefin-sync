@@ -5,20 +5,18 @@ import { syncWorkflowYaml, repoReadme, buildMapValue } from "./public/templates.
 
 // --- Templates -------------------------------------------------------------------------
 
-test("workflow template embeds the minute and the pinned package major", () => {
-    const yaml = syncWorkflowYaml(37);
-    assert.match(yaml, /- cron: "37 \*\/6 \* \* \*"/);
+test("workflow template pins the schedule and the package major", () => {
+    const yaml = syncWorkflowYaml();
+    assert.match(yaml, /- cron: "0 \*\/2 \* \* \*"/);
     assert.match(yaml, /npx ynab-simplefin-sync@3 sync/);
     assert.match(yaml, /workflow_dispatch:/);
     assert.match(yaml, /actions: write/);
     assert.match(yaml, /workflows\/sync\.yml\/enable/);
     assert.ok(!yaml.includes("\t"), "workflow must not contain tabs");
-    assert.throws(() => syncWorkflowYaml(60));
-    assert.throws(() => syncWorkflowYaml(-1));
 });
 
 test("workflow references exactly the four provisioned secrets", () => {
-    const yaml = syncWorkflowYaml(0);
+    const yaml = syncWorkflowYaml();
     const secrets = [...yaml.matchAll(/secrets\.([A-Z_]+)/g)].map((m) => m[1]);
     assert.deepEqual(
         [...new Set(secrets)].sort(),
