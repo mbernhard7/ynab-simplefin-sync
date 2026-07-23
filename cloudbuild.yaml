@@ -2,6 +2,10 @@
 # Attached to a Cloud Build trigger on pushes to main. Deploying by image only:
 # the service's existing env vars (BASE_URL, GITHUB_*) carry over to each new revision.
 
+# Triggers that run as a specified service account must declare a logging mode.
+options:
+  logging: CLOUD_LOGGING_ONLY
+
 steps:
   - name: gcr.io/cloud-builders/docker
     args: ["build", "-t", "${_IMAGE}", "app"]
