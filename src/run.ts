@@ -93,10 +93,18 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
             const only = options.archiveAccounts ?? resolveArchiveAccounts(config);
             const snapshot = writeSnapshot(options.archiveDir, accountSet, new Date(), only);
 
-            info(
-                `Archived ${snapshot.accounts} account(s), ${snapshot.transactions} transaction(s), ` +
-                `${snapshot.holdings} holding(s) → ${snapshot.path} (${Math.round(snapshot.bytes / 1024)}KB)`,
-            );
+            if (snapshot.written.length > 0) {
+                const bytes = snapshot.written.reduce((sum, w) => sum + w.bytes, 0);
+                info(
+                    `Archived ${snapshot.written.length} updated account(s), ${snapshot.transactions} transaction(s), ` +
+                    `${snapshot.holdings} holding(s) → ${snapshot.dir} (${Math.round(bytes / 1024)}KB)`,
+                );
+            } else {
+                info("Archive up to date — no account has a newer SimpleFIN balance-date since the last snapshot.");
+            }
+            if (snapshot.unchanged.length > 0) {
+                detail(`${snapshot.unchanged.length} account(s) unchanged since the last snapshot.`);
+            }
             if (snapshot.excluded.length > 0) {
                 detail(`Excluded ${snapshot.excluded.length} account(s) by configuration.`);
             }

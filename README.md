@@ -196,17 +196,24 @@ no writable config directory. `link` prints the value to paste in.
 ## Archiving
 
 SimpleFIN serves a rolling **90-day** transaction window and nothing older, so anything not
-captured is permanently lost. `--archive <dir>` (or `ARCHIVE_DIR`) writes the untouched response
-to `<dir>/simplefin-YYYY-MM-DD.json` on every run.
+captured is permanently lost. `--archive <dir>` (or `ARCHIVE_DIR`) writes each account's untouched
+response object to `<dir>/<account-id>/<balance-date>.json`.
+
+Storage is keyed by `balance-date` — SimpleFIN's own "as of" timestamp for the balance — so a
+write is **idempotent per refresh**: a run only produces a file when SimpleFIN has actually
+advanced that account since the last snapshot. Polling every couple of hours therefore writes
+nothing until an institution refreshes, and each stored file is a distinct point-in-time balance
+rather than one daily blob overwritten in place. (A malformed account with no `balance-date` is
+archived once under `undated.json`.)
 
 It rides on the sync's existing request — the Bridge's quota counts requests, not bytes — so
 archiving 90 days of history costs no extra quota. The full window is re-fetched every run
 rather than incrementally, because institutions post late: an observed dividend transacted
 2026-06-23 posted on 2026-07-10.
 
-The raw body is stored rather than the parsed account set, so nothing is lost to this tool's
+The raw account object is stored rather than the parsed one, so nothing is lost to this tool's
 schema — in particular `holdings`, which the Bridge returns as an extension beyond the published
-v2 spec. Files are uncompressed on purpose: consecutive snapshots overlap by ~99% and git deltas
+v2 spec. Files are uncompressed on purpose: consecutive snapshots overlap heavily and git deltas
 them to almost nothing, which per-file gzip would defeat.
 
 By default every account is archived. To narrow it:
