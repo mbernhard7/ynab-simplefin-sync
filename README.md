@@ -7,6 +7,12 @@ Reconciles YNAB account balances against [SimpleFIN Bridge](https://beta-bridge.
 it fetches what each account is actually worth and posts a single `Balance Adjustment` per account
 for the difference. No positions, tickers, or price feeds.
 
+> [!TIP]
+> **No-install setup:** [ynab-simplefin-sync.milesbernhard.com](https://ynab-simplefin-sync.milesbernhard.com)
+> provisions the sync into a repository in your own GitHub account — credentials are sealed in
+> your browser and stored only as encrypted secrets in that repo. This is the only official
+> hosted instance; see [`app/`](app/README.md) for how it works.
+
 ```
 $ ynab-simplefin-sync sync
 [YSS] Fetching YNAB accounts...
