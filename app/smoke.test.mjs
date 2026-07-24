@@ -121,9 +121,19 @@ test("server routes", async (t) => {
         assert.match(res.headers.get("set-cookie"), /oauth_state=[0-9a-f]{32}; HttpOnly/);
     });
 
-    await t.test("callback rejects a state mismatch", async () => {
+    await t.test("callback bounces a state mismatch to the wizard without exchanging", async () => {
         const res = await fetch(`${base}/callback?code=x&state=y`, { redirect: "manual" });
-        assert.equal(res.status, 400);
+        assert.equal(res.status, 302);
+        assert.equal(res.headers.get("location"), "/#oauth-restart");
+    });
+
+    await t.test("install plants a state cookie and passes state to GitHub", async () => {
+        const res = await fetch(`${base}/install`, { redirect: "manual" });
+        assert.equal(res.status, 302);
+        const location = res.headers.get("location");
+        assert.match(location, /^https:\/\/github\.com\/apps\/test-app\/installations\/new\?state=[0-9a-f]{32}$/);
+        const state = location.match(/state=([0-9a-f]{32})/)[1];
+        assert.match(res.headers.get("set-cookie"), new RegExp(`oauth_state=${state}; HttpOnly`));
     });
 
     await t.test("static path traversal is blocked", async () => {
