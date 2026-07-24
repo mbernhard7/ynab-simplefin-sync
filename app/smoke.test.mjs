@@ -109,7 +109,7 @@ test("server routes", async (t) => {
     await t.test("config endpoint exposes no secrets", async () => {
         const res = await fetch(`${base}/config`);
         const body = await res.json();
-        assert.deepEqual(Object.keys(body).sort(), ["app_slug", "configured", "simplefin_hosts"]);
+        assert.deepEqual(Object.keys(body).sort(), ["app_slug", "commit", "configured", "simplefin_hosts"]);
     });
 
     await t.test("login redirects to GitHub with a state cookie", async () => {

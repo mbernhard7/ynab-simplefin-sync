@@ -15,7 +15,14 @@ steps:
 
   - name: gcr.io/google.com/cloudsdktool/cloud-sdk:slim
     entrypoint: gcloud
-    args: ["run", "deploy", "${_SERVICE}", "--image", "${_IMAGE}", "--region", "${_REGION}", "--quiet"]
+    args:
+      [
+        "run", "deploy", "${_SERVICE}",
+        "--image", "${_IMAGE}",
+        "--region", "${_REGION}",
+        "--update-env-vars", "APP_COMMIT=${COMMIT_SHA}",
+        "--quiet",
+      ]
 
 substitutions:
   _SERVICE: ynab-simplefin-app

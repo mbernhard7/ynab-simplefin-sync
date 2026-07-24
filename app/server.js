@@ -351,6 +351,7 @@ GITHUB_APP_SLUG=${escapeHtml(app.slug)}</pre>
                     configured: Boolean(config.clientId),
                     app_slug: config.appSlug,
                     simplefin_hosts: config.simplefinHosts,
+                    commit: process.env.APP_COMMIT ?? "unknown",
                 });
             }
             if (route === "GET /login") return login(res);
