@@ -83,8 +83,14 @@ const pickUpToken = () => {
 };
 
 const initGithub = async () => {
+    const restarted = location.hash.includes("oauth-restart");
+    if (restarted) history.replaceState(null, "", location.pathname);
+
     const token = pickUpToken();
-    if (!token) return;
+    if (!token) {
+        if (restarted) setStatus("github-status", "That sign-in attempt expired — click Connect GitHub.", "error");
+        return;
+    }
 
     state.ghToken = token;
     try {
@@ -379,9 +385,9 @@ const provision = async () => {
         if (!slackWebhook) log("  (Slack notifications off — add a SLACK_WEBHOOK_URL secret to enable)");
         if (!archiveAccounts) log("  (archiving off — add a SIMPLEFIN_ARCHIVE_ACCOUNTS secret to enable)");
 
-        log("Starting a dry run…");
+        log("Starting a dry run (GitHub can take up to a minute to index a new workflow)…");
         let dispatched = false;
-        for (let attempt = 0; attempt < 6 && !dispatched; attempt += 1) {
+        for (let attempt = 0; attempt < 12 && !dispatched; attempt += 1) {
             try {
                 await gh(`/repos/${state.ghLogin}/${repo}/actions/workflows/sync.yml/dispatches`, {
                     method: "POST",
@@ -389,10 +395,11 @@ const provision = async () => {
                 });
                 dispatched = true;
             } catch {
-                await sleep(3000); // workflow indexing lags the file push briefly
+                if (attempt === 3) log("  still waiting for GitHub to index the workflow…");
+                await sleep(5000);
             }
         }
-        log(dispatched ? "  dry run started ✓" : "  couldn't start a dry run — run it from the Actions tab.");
+        log(dispatched ? "  dry run started ✓" : "  GitHub never indexed it in time — run it from the Actions tab (harmless).");
 
         $("done-repo").href = `https://github.com/${state.ghLogin}/${repo}`;
         $("done-actions").href = `https://github.com/${state.ghLogin}/${repo}/actions`;
@@ -413,9 +420,9 @@ const init = async () => {
         // non-fatal
     }
 
-    if (state.appSlug) {
-        $("install-link").href = `https://github.com/apps/${state.appSlug}/installations/new`;
-    }
+    // /install plants the CSRF state cookie before sending the user to GitHub, so the
+    // post-install callback carries a state we recognize.
+    $("install-link").href = "/install";
     $("repo-name").addEventListener("input", () => {
         $("new-repo-link").href = `https://github.com/new?name=${encodeURIComponent($("repo-name").value.trim())}`;
     });
