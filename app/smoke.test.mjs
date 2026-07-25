@@ -103,7 +103,17 @@ test("server routes", async (t) => {
         assert.equal(res.status, 200);
         assert.match(res.headers.get("content-type"), /text\/html/);
         assert.match(res.headers.get("content-security-policy"), /frame-ancestors 'none'/);
-        assert.match(await res.text(), /Connect GitHub/);
+        const html = await res.text();
+        assert.match(html, /Connect GitHub/);
+        assert.match(html, /id="about"/);
+        assert.match(html, /favicon\.svg/);
+    });
+
+    await t.test("serves the favicon as SVG", async () => {
+        const res = await fetch(`${base}/favicon.svg`);
+        assert.equal(res.status, 200);
+        assert.match(res.headers.get("content-type"), /image\/svg\+xml/);
+        assert.match(await res.text(), /<svg/);
     });
 
     await t.test("config endpoint exposes no secrets", async () => {

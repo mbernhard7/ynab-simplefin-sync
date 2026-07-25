@@ -4,6 +4,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>YNAB SimpleFIN Sync</title>
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg">
     <link rel="stylesheet" href="/style.css">
     <script src="/vendor/libsodium.js" defer></script>
     <script src="/vendor/libsodium-wrappers.js" defer></script>
@@ -17,6 +18,7 @@
             Automatic balance syncing that runs in <strong>your</strong> GitHub account.
             Your credentials are sealed in your browser and stored only as encrypted secrets
             in a repository you own — this site never sees or stores them.
+            <a href="#about">Learn how it works ↓</a>
         </p>
     </header>
 
@@ -121,6 +123,46 @@
                large-adjustment safety guard. Check the numbers in the dry-run log, then run the
                workflow once with <code>force</code> checked. After that it runs itself.</p>
         </div>
+    </section>
+
+    <section class="about" id="about">
+        <h2>About</h2>
+
+        <h3>What this is</h3>
+        <p>YNAB is great at budgeting but can't see inside most investment accounts — brokerages,
+           401(k)s, HSAs — so those balances go stale unless you update them by hand. This tool
+           keeps them matched to what your institutions actually report, automatically, using
+           <a href="https://beta-bridge.simplefin.org" target="_blank" rel="noreferrer">SimpleFIN Bridge</a>
+           as the read-only connection to your institutions.</p>
+
+        <h3>How it works</h3>
+        <ol>
+            <li>The wizard above creates a <strong>private repository in your own GitHub
+                account</strong> containing a small scheduled workflow.</li>
+            <li>Every 2 hours, that workflow fetches your balances from SimpleFIN and posts one
+                <em>Balance Adjustment</em> transaction per mapped account in YNAB for any
+                difference. Repeat runs amend the same day's transaction, so your register stays
+                clean, and built-in guards refuse implausibly large adjustments and never treat
+                a missing account as zero.</li>
+            <li>Optionally, each run notifies Slack, and each account's raw transaction history
+                is archived into the repository — SimpleFIN only serves a rolling 90-day window,
+                so the archive preserves what would otherwise age away.</li>
+        </ol>
+
+        <h3>Where your credentials live</h3>
+        <p>Your SimpleFIN and YNAB credentials are sealed <em>in your browser</em> with
+           <a href="https://doc.libsodium.org/public-key_cryptography/sealed_boxes" target="_blank" rel="noreferrer">libsodium sealed boxes</a>
+           and written directly into that repository's encrypted GitHub Actions secrets — readable
+           only by your own workflow runs. This site stores nothing and keeps no accounts, and
+           after setup nothing depends on it: if this site disappeared tomorrow, your sync would
+           keep running untouched. The GitHub access you grant is scoped to the single repository
+           you pick.</p>
+
+        <h3>What it costs</h3>
+        <p>Nothing, here. The sync runs well within GitHub's free Actions tier, and this site is
+           <a href="https://github.com/mbernhard7/ynab-simplefin-sync">open source</a> — this is
+           the only official instance. SimpleFIN Bridge charges a small subscription
+           (about $1.50/month), paid by you directly to SimpleFIN.</p>
     </section>
 
     <footer>
