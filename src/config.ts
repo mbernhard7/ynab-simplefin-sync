@@ -2,6 +2,7 @@ import { readFileSync, writeFileSync, mkdirSync, existsSync } from "node:fs";
 import { homedir } from "node:os";
 import { dirname, join } from "node:path";
 import { parseNote, type YnabAccountLike } from "./reconcile";
+import type { ContributionRule, ContributionsConfig } from "./contributions";
 
 export type MappingSource = "note" | "config" | "env";
 
@@ -17,6 +18,8 @@ export interface Config {
     mappings: Record<string, { name?: string; simplefinIds: string[] }>;
     /** SimpleFIN account ids to archive. Absent means archive nothing. */
     archiveAccounts?: string[];
+    /** Payroll deposits to post as their own transactions. Absent means post none. */
+    contributions?: ContributionsConfig;
 }
 
 export const configDir = (): string =>
@@ -27,6 +30,69 @@ export const configPath = (): string => join(configDir(), "config.json");
 const legacyConfigPath = (): string => join(configDir(), "mappings.json");
 
 export const emptyConfig = (): Config => ({ version: 1, mappings: {} });
+
+const ISO_DATE = /^\d{4}-\d{2}-\d{2}$/;
+
+/**
+ * A malformed rule is rejected rather than dropped: a rule silently missing its `sign` would
+ * post withdrawals as income, and one missing its `payee` would be invisible to a report.
+ */
+const parseContributionRule = (entry: unknown, path: string, index: number): ContributionRule => {
+    const where = `contributions.rules[${index}] in ${path}`;
+    if (typeof entry !== "object" || entry === null) throw new Error(`${where} is not an object.`);
+
+    const raw = entry as Record<string, unknown>;
+    const requireString = (key: string): string => {
+        const value = raw[key];
+        if (typeof value !== "string" || value.trim() === "") {
+            throw new Error(`${where} is missing a non-empty "${key}".`);
+        }
+        return value;
+    };
+
+    const sign = raw.sign;
+    if (sign !== "positive" && sign !== "negative") {
+        throw new Error(`${where} needs "sign" to be "positive" or "negative".`);
+    }
+
+    const rule: ContributionRule = {
+        simplefinId: requireString("simplefinId"),
+        match: requireString("match"),
+        sign,
+        payee: requireString("payee"),
+    };
+
+    if (typeof raw.memo === "string") rule.memo = raw.memo;
+
+    const window = raw.reviewWindow;
+    if (typeof window === "object" && window !== null) {
+        const { from, to } = window as Record<string, unknown>;
+        if (typeof from !== "string" || typeof to !== "string") {
+            throw new Error(`${where} has a reviewWindow without string "from" and "to" (MM-DD).`);
+        }
+        rule.reviewWindow = { from, to };
+    }
+
+    return rule;
+};
+
+const parseContributions = (value: unknown, path: string): ContributionsConfig | undefined => {
+    if (typeof value !== "object" || value === null) return undefined;
+
+    const raw = value as Record<string, unknown>;
+    const rules = Array.isArray(raw.rules)
+        ? raw.rules.map((entry, index) => parseContributionRule(entry, path, index))
+        : [];
+
+    if (rules.length === 0) return undefined;
+
+    const since = raw.since;
+    if (since !== undefined && (typeof since !== "string" || !ISO_DATE.test(since))) {
+        throw new Error(`contributions.since in ${path} must be a YYYY-MM-DD date.`);
+    }
+
+    return { rules, ...(typeof since === "string" ? { since } : {}) };
+};
 
 const parseConfig = (parsed: unknown, path: string): Config => {
     if (typeof parsed !== "object" || parsed === null) {
@@ -43,6 +109,9 @@ const parseConfig = (parsed: unknown, path: string): Config => {
         const ids = archive.filter((id): id is string => typeof id === "string" && id.length > 0);
         if (ids.length > 0) config.archiveAccounts = ids;
     }
+
+    const contributions = parseContributions((parsed as { contributions?: unknown }).contributions, path);
+    if (contributions) config.contributions = contributions;
 
     const raw = (parsed as { mappings?: unknown }).mappings;
     if (typeof raw === "object" && raw !== null) {
@@ -142,6 +211,28 @@ export const resolveArchiveAccounts = (config: Config = readConfig()): string[] 
     const fromEnv = process.env.SIMPLEFIN_ARCHIVE_ACCOUNTS;
     if (fromEnv !== undefined && fromEnv.trim() !== "") return parseArchiveList(fromEnv);
     return config.archiveAccounts ?? [];
+};
+
+/**
+ * Contribution rules, environment first. The scheduled job has no config file, so
+ * `SIMPLEFIN_CONTRIBUTIONS` carries the same JSON object (`{"since":…,"rules":[…]}`) that
+ * `config.json` would hold. These are settings, not secrets — a rule names an account and a
+ * payee, never a credential.
+ */
+export const resolveContributions = (config: Config = readConfig()): ContributionsConfig | undefined => {
+    const fromEnv = process.env.SIMPLEFIN_CONTRIBUTIONS;
+
+    if (fromEnv !== undefined && fromEnv.trim() !== "") {
+        let parsed: unknown;
+        try {
+            parsed = JSON.parse(fromEnv);
+        } catch (err) {
+            throw new Error(`SIMPLEFIN_CONTRIBUTIONS is not valid JSON: ${(err as Error).message}`);
+        }
+        return parseContributions(parsed, "SIMPLEFIN_CONTRIBUTIONS");
+    }
+
+    return config.contributions;
 };
 
 export interface ResolveSources {

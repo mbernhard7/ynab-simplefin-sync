@@ -17,7 +17,7 @@ ynab-simplefin-sync — reconcile YNAB balances against SimpleFIN
 Usage: ynab-simplefin-sync <command> [options]
 
 Commands:
-  sync            Fetch balances and post one adjustment per account (default)
+  sync            Post payroll contributions, then one adjustment per account (default)
   setup           Guided first run: credentials, budget, mappings, archive
   link            Map YNAB accounts to SimpleFIN accounts
   discover        List SimpleFIN and YNAB accounts
@@ -25,9 +25,10 @@ Commands:
   help            Show this help
 
 Options:
-  sync    --dry-run  --force  --stale-hours <n>  --threshold <usd>  --archive <dir>
-  link    --archive  --print-only
-  setup   --skip-link
+  sync      --dry-run  --force  --stale-hours <n>  --threshold <usd>  --archive <dir>
+            --no-contributions
+  link      --archive  --print-only
+  setup     --skip-link
 
 Environment:
   YNAB_API_TOKEN                required
@@ -145,11 +146,15 @@ const sync = async (argv: string[]) => {
         archiveDir: stringFlag(argv, "--archive") ?? process.env.ARCHIVE_DIR,
         dryRun: argv.includes("--dry-run") || process.env.DRY_RUN === "1",
         force: argv.includes("--force"),
+        noContributions: argv.includes("--no-contributions"),
         staleAfterHours: numericFlag(argv, "--stale-hours"),
         thresholdAbsolute: thresholdUsd === undefined ? undefined : Math.round(thresholdUsd * 1000),
     });
 
-    info(`Done. applied=${summary.applied} failed=${summary.failed} blocked=${summary.blocked}`);
+    info(
+        `Done. contributions=${summary.contributionsPosted} applied=${summary.applied} ` +
+        `failed=${summary.failed} blocked=${summary.blocked}`,
+    );
 
     if (summary.failed > 0 || summary.blocked > 0) {
         process.exitCode = 2;

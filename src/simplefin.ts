@@ -8,6 +8,18 @@ export interface SimpleFinOrg {
     id?: string;
 }
 
+export interface SimpleFinTransaction {
+    id: string;
+    /** Unix seconds. Connectors post local midnight, so read it as a calendar date. */
+    posted: number;
+    amount: string;
+    description?: string;
+    payee?: string;
+    memo?: string;
+    transacted_at?: number;
+    pending?: boolean;
+}
+
 export interface SimpleFinAccount {
     id: string;
     name: string;
@@ -17,6 +29,8 @@ export interface SimpleFinAccount {
     "balance-date": number;
     org?: SimpleFinOrg;
     conn_id?: string;
+    /** Present only when the request asked for a window; balances-only responses omit it. */
+    transactions?: SimpleFinTransaction[];
 }
 
 export interface SimpleFinError {
@@ -65,6 +79,42 @@ export const claimSetupToken = async (setupToken: string): Promise<string> => {
 const isRecord = (v: unknown): v is Record<string, unknown> =>
     typeof v === "object" && v !== null && !Array.isArray(v);
 
+const optionalString = (v: unknown): string | undefined => (typeof v === "string" ? v : undefined);
+
+/**
+ * A transaction missing `id`, `posted`, or `amount` is dropped: those three are what the
+ * contribution rules key on, and a defaulted one would post real money on a guessed date.
+ */
+const parseTransactions = (value: unknown): SimpleFinTransaction[] | undefined => {
+    if (!Array.isArray(value)) return undefined;
+
+    const transactions: SimpleFinTransaction[] = [];
+
+    for (const t of value) {
+        if (!isRecord(t)) continue;
+
+        const id = optionalString(t.id);
+        const posted = typeof t.posted === "number" ? t.posted : undefined;
+        const amount =
+            typeof t.amount === "string" || typeof t.amount === "number" ? String(t.amount) : undefined;
+
+        if (id === undefined || posted === undefined || amount === undefined) continue;
+
+        transactions.push({
+            id,
+            posted,
+            amount,
+            description: optionalString(t.description),
+            payee: optionalString(t.payee),
+            memo: optionalString(t.memo),
+            transacted_at: typeof t.transacted_at === "number" ? t.transacted_at : undefined,
+            pending: typeof t.pending === "boolean" ? t.pending : undefined,
+        });
+    }
+
+    return transactions;
+};
+
 /** An account missing `id`, `balance`, or `balance-date` is dropped rather than defaulted. */
 const parseAccountSet = (body: unknown): SimpleFinAccountSet => {
     if (!isRecord(body)) {
@@ -106,6 +156,7 @@ const parseAccountSet = (body: unknown): SimpleFinAccountSet => {
             "balance-date": balanceDate,
             org: isRecord(a.org) ? (a.org as SimpleFinOrg) : undefined,
             conn_id: typeof a.conn_id === "string" ? a.conn_id : undefined,
+            transactions: parseTransactions(a.transactions),
         });
     }
 

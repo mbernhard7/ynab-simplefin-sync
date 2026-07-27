@@ -1,8 +1,14 @@
 import { API } from "ynab";
 import { getAccounts as getSimpleFinAccounts, MAX_WINDOW_DAYS } from "./simplefin";
 import { localDate, reconcile, type AccountPlan, type ReconcileOptions } from "./reconcile";
-import { applyPlans, getAccounts as getYnabAccounts, getLastActivityByAccount } from "./ynab";
-import { readConfig, resolveArchiveAccounts, resolveMappings } from "./config";
+import { applyPlans, getAccounts as getYnabAccounts, getLastActivityByAccount, postTransactions } from "./ynab";
+import {
+    contributionTotals,
+    planContributions,
+    type ContributionPlan,
+    type ContributionsConfig,
+} from "./contributions";
+import { readConfig, resolveArchiveAccounts, resolveContributions, resolveMappings } from "./config";
 import { writeSnapshot } from "./archive";
 import { detail, formatMilliunits, info, warn } from "./log";
 
@@ -15,6 +21,10 @@ export interface RunOptions extends ReconcileOptions {
     archiveDir?: string;
     /** SimpleFIN account ids to archive. Omit to use the configured set (none by default). */
     archiveAccounts?: string[];
+    /** Contribution rules. Omit to use the configured set (none by default). */
+    contributions?: ContributionsConfig;
+    /** Skip the contribution pass entirely, leaving adjustments to absorb payroll deposits. */
+    noContributions?: boolean;
 }
 
 export interface RunSummary {
@@ -23,6 +33,10 @@ export interface RunSummary {
     failed: number;
     /** Skips caused by a broken upstream connection or a tripped safety guard. */
     blocked: number;
+    /** Payroll deposits planned this run, whether or not they were written. */
+    contributions: ContributionPlan[];
+    /** Contributions newly written to YNAB; ones already present are not counted. */
+    contributionsPosted: number;
 }
 
 const describePlan = (plan: AccountPlan): string => {
@@ -94,15 +108,21 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
 
     if (mappings.length === 0) {
         warn("No accounts are mapped. Run `link` to pick them interactively, or `discover` to list ids.");
-        return { plans: [], applied: 0, failed: 0, blocked: 0 };
+        return { plans: [], applied: 0, failed: 0, blocked: 0, contributions: [], contributionsPosted: 0 };
     }
 
     const mappedIds = new Set(mappings.map((m) => m.ynabAccountId));
-    const mapped = ynabAccounts.filter((a) => mappedIds.has(a.id));
+    let mapped = ynabAccounts.filter((a) => mappedIds.has(a.id));
+
+    const contributionRules = options.noContributions
+        ? undefined
+        : options.contributions ?? resolveContributions(config);
 
     const archiving = Boolean(options.archiveDir);
-    info(archiving ? `Fetching SimpleFIN balances and ${MAX_WINDOW_DAYS}d of history...` : "Fetching SimpleFIN balances...");
-    const accountSet = await getSimpleFinAccounts(options.accessUrl, { days: archiving ? MAX_WINDOW_DAYS : 0 });
+    // Contributions are read out of the transaction feed, so they need the window too.
+    const needsHistory = archiving || contributionRules !== undefined;
+    info(needsHistory ? `Fetching SimpleFIN balances and ${MAX_WINDOW_DAYS}d of history...` : "Fetching SimpleFIN balances...");
+    const accountSet = await getSimpleFinAccounts(options.accessUrl, { days: needsHistory ? MAX_WINDOW_DAYS : 0 });
     info(`Fetched ${accountSet.accounts.length} SimpleFIN account(s).`);
 
     for (const err of accountSet.errors) {
@@ -115,6 +135,74 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
             writeArchive(options.archiveDir, accountSet, options.archiveAccounts ?? resolveArchiveAccounts(config));
         } catch (err) {
             warn(`Archive failed: ${err instanceof Error ? err.message : String(err)}`);
+        }
+    }
+
+    // Contributions go in BEFORE the balance is reconciled. Employer match and pre-tax
+    // deferrals never touch a checking account, so a balance-only sync buries them inside
+    // `Balance Adjustment` and they vanish from any income or savings-rate figure. Posting
+    // them first means the adjustment that follows covers only market movement.
+    let contributions: ContributionPlan[] = [];
+    let contributionsPosted = 0;
+
+    if (contributionRules) {
+        contributions = planContributions(accountSet, {
+            contributions: contributionRules,
+            mappings,
+            ynabAccounts: mapped,
+        });
+
+        if (contributions.length > 0) {
+            info(`Contributions (${contributions.length}):`);
+            for (const plan of contributions) {
+                detail(
+                    `${plan.date} ${plan.ynabAccountName}: ${plan.payee} ${formatMilliunits(plan.amountMilliunits)}` +
+                    `${plan.needsReview ? " [REVIEW]" : ""}`,
+                );
+            }
+            for (const plan of contributions.filter((p) => p.needsReview)) {
+                warn(
+                    `${plan.date} ${plan.ynabAccountName} ${formatMilliunits(plan.amountMilliunits)} fell in the ` +
+                    `employer-true-up window. The feed cannot tell a match from a deferral — retag it in YNAB if it is a match.`,
+                );
+            }
+        } else {
+            detail("No new payroll contributions in the SimpleFIN window.");
+        }
+
+        // A dry run writes nothing, so model the effect instead: without this the previewed
+        // adjustment is the one you would get with contributions off, which is not the plan.
+        if (contributions.length > 0 && options.dryRun) {
+            const totals = contributionTotals(contributions);
+            mapped = mapped.map((a) => ({ ...a, balance: a.balance + (totals.get(a.id) ?? 0) }));
+        }
+
+        if (contributions.length > 0 && !options.dryRun) {
+            const result = await postTransactions(
+                api,
+                options.budgetId,
+                contributions.map((plan) => ({
+                    ynabAccountId: plan.ynabAccountId,
+                    date: plan.date,
+                    amountMilliunits: plan.amountMilliunits,
+                    payee: plan.payee,
+                    memo: plan.memo,
+                    importId: plan.importId,
+                })),
+            );
+
+            contributionsPosted = result.created;
+            info(
+                `Contributions: created=${result.created} already-present=${result.duplicate} failed=${result.failed}`,
+            );
+            for (const err of result.errors) warn(`Contribution write failed: ${err}`);
+
+            // Re-read balances so the adjustment below measures the gap that is left after
+            // the contributions landed, rather than posting the same money a second time.
+            if (result.created > 0) {
+                const refreshed = await getYnabAccounts(api, options.budgetId);
+                mapped = refreshed.filter((a) => mappedIds.has(a.id));
+            }
         }
     }
 
@@ -148,18 +236,18 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
     ).length;
 
     if (options.dryRun) {
-        info(`Dry run — ${adjustments.length} adjustment(s) withheld.`);
-        return { plans, applied: 0, failed: 0, blocked };
+        info(`Dry run — ${adjustments.length} adjustment(s) and ${contributions.length} contribution(s) withheld.`);
+        return { plans, applied: 0, failed: 0, blocked, contributions, contributionsPosted: 0 };
     }
 
     if (adjustments.length === 0) {
-        info("Nothing to post.");
-        return { plans, applied: 0, failed: 0, blocked };
+        info("No balance adjustment needed.");
+        return { plans, applied: 0, failed: 0, blocked, contributions, contributionsPosted };
     }
 
     info(`Posting ${adjustments.length} adjustment(s) to YNAB...`);
     const results = await applyPlans(api, options.budgetId, adjustments);
 
     const failed = results.filter((r) => r.outcome === "failed").length;
-    return { plans, applied: results.length - failed, failed, blocked };
+    return { plans, applied: results.length - failed, failed, blocked, contributions, contributionsPosted };
 };

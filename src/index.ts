@@ -7,9 +7,23 @@ export type {
     YnabAccountLike,
 } from "./reconcile";
 export { claimSetupToken, getAccounts as getSimpleFinAccounts } from "./simplefin";
-export type { SimpleFinAccount, SimpleFinAccountSet, SimpleFinError } from "./simplefin";
-export { applyPlan, applyPlans, PAYEE_NAME } from "./ynab";
-export type { ApplyResult, ApplyOutcome } from "./ynab";
+export type {
+    SimpleFinAccount,
+    SimpleFinAccountSet,
+    SimpleFinError,
+    SimpleFinTransaction,
+} from "./simplefin";
+export { applyPlan, applyPlans, postTransactions, PAYEE_NAME } from "./ynab";
+export type { ApplyResult, ApplyOutcome, PostableTransaction, PostResult } from "./ynab";
+export {
+    planContributions,
+    contributionTotals,
+    inMonthDayWindow,
+    buildContributionImportId,
+    CONTRIBUTION_IMPORT_ID_PREFIX,
+    CONTRIBUTION_OFFSET_IMPORT_ID_PREFIX,
+} from "./contributions";
+export type { ContributionRule, ContributionsConfig, ContributionPlan } from "./contributions";
 export { toMilliunits } from "./money";
 export { writeSnapshot, filterAccounts } from "./archive";
 export type { SnapshotResult } from "./archive";
@@ -26,6 +40,7 @@ export {
     formatEnvMap,
     resolveBudgetId,
     resolveArchiveAccounts,
+    resolveContributions,
     parseArchiveList,
     resolveMappings,
     shadowedByNote,

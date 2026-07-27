@@ -1,8 +1,22 @@
 import { API, NewTransaction, TransactionClearedStatus, TransactionFlagColor } from "ynab";
 import { ADJUSTMENT_IMPORT_ID_PREFIX, type AccountPlan, type YnabAccountLike } from "./reconcile";
+import {
+    CONTRIBUTION_IMPORT_ID_PREFIX,
+    CONTRIBUTION_OFFSET_IMPORT_ID_PREFIX,
+} from "./contributions";
 import { info, warn } from "./log";
 
 export const PAYEE_NAME = "Balance Adjustment";
+
+/** Every import_id prefix this tool writes. All of them are its own activity, not a human's. */
+const OWN_IMPORT_ID_PREFIXES = [
+    ADJUSTMENT_IMPORT_ID_PREFIX,
+    CONTRIBUTION_IMPORT_ID_PREFIX,
+    CONTRIBUTION_OFFSET_IMPORT_ID_PREFIX,
+];
+
+const isOwnImportId = (importId?: string | null): boolean =>
+    importId !== undefined && importId !== null && OWN_IMPORT_ID_PREFIXES.some((p) => importId.startsWith(p));
 
 export const getAccounts = async (api: API, budgetId: string): Promise<YnabAccountLike[]> => {
     const { data } = await api.accounts.getAccounts(budgetId);
@@ -18,8 +32,9 @@ export const getAccounts = async (api: API, budgetId: string): Promise<YnabAccou
 
 /**
  * Most recent transaction date per account (`YYYY-MM-DD`) since `sinceDate`. This tool's own
- * adjustments are excluded by their `import_id` prefix so a fresh adjustment can't make an
- * account look newer than SimpleFIN.
+ * writes are excluded by their `import_id` prefix so a fresh adjustment can't make an account
+ * look newer than SimpleFIN. Contributions are excluded for the same reason — they are read
+ * out of the feed, so they can never be activity SimpleFIN has not yet seen.
  */
 export const getLastActivityByAccount = async (
     api: API,
@@ -31,7 +46,7 @@ export const getLastActivityByAccount = async (
 
     for (const t of data.transactions) {
         if (t.deleted) continue;
-        if (t.import_id?.startsWith(ADJUSTMENT_IMPORT_ID_PREFIX)) continue;
+        if (isOwnImportId(t.import_id)) continue;
 
         const current = latest.get(t.account_id);
         if (current === undefined || t.date > current) latest.set(t.account_id, t.date);
@@ -123,6 +138,88 @@ export const applyPlan = async (api: API, budgetId: string, plan: AccountPlan): 
     } catch (err) {
         return { plan, outcome: "failed", error: await describeApiError(err) };
     }
+};
+
+/** One YNAB transaction to create. */
+export interface PostableTransaction {
+    ynabAccountId: string;
+    date: string;
+    /** Signed milliunits: positive for a contribution, negative for its offset. */
+    amountMilliunits: number;
+    payee: string;
+    memo: string;
+    importId: string;
+    flagColor?: TransactionFlagColor;
+}
+
+export interface PostResult {
+    created: number;
+    /** Already present, matched by `import_id`. Re-running is a no-op, not a duplicate row. */
+    duplicate: number;
+    failed: number;
+    errors: string[];
+}
+
+/** YNAB's bulk endpoint takes a large array; chunking keeps a single failure from losing the lot. */
+const POST_CHUNK_SIZE = 100;
+
+const toNewTransaction = (item: PostableTransaction): NewTransaction => ({
+    account_id: item.ynabAccountId,
+    date: item.date,
+    amount: item.amountMilliunits,
+    payee_name: item.payee,
+    memo: item.memo.slice(0, 200),
+    cleared: TransactionClearedStatus.Cleared,
+    approved: true,
+    flag_color: item.flagColor ?? TransactionFlagColor.Green,
+    import_id: item.importId,
+});
+
+/**
+ * Creates transactions in bulk, keyed by `import_id`. An id YNAB already holds comes back in
+ * `duplicate_import_ids` rather than creating a second row, which is what makes a re-run of the
+ * daily sync safe to repeat.
+ */
+export const postTransactions = async (
+    api: API,
+    budgetId: string,
+    items: PostableTransaction[],
+): Promise<PostResult> => {
+    const result: PostResult = { created: 0, duplicate: 0, failed: 0, errors: [] };
+
+    for (let offset = 0; offset < items.length; offset += POST_CHUNK_SIZE) {
+        const chunk = items.slice(offset, offset + POST_CHUNK_SIZE);
+
+        try {
+            const { data } = await api.transactions.createTransactions(budgetId, {
+                transactions: chunk.map(toNewTransaction),
+            });
+
+            // Counted from the ids YNAB hands back, never inferred from the chunk size. A run that
+            // assumed "accepted with no duplicates" meant "all created" once reported 172 writes
+            // for 144 actual rows, and a caller trusted that number. Anything the response does
+            // not account for is a failure, not a silent success.
+            const duplicates = new Set(data.duplicate_import_ids ?? []);
+            const created = data.transaction_ids?.length ?? 0;
+
+            result.duplicate += duplicates.size;
+            result.created += created;
+
+            const unaccounted = chunk.length - created - duplicates.size;
+            if (unaccounted > 0) {
+                result.failed += unaccounted;
+                result.errors.push(
+                    `YNAB accepted ${chunk.length} transaction(s) but reported ${created} created ` +
+                    `and ${duplicates.size} duplicate — ${unaccounted} unaccounted for.`,
+                );
+            }
+        } catch (err) {
+            result.failed += chunk.length;
+            result.errors.push(await describeApiError(err));
+        }
+    }
+
+    return result;
 };
 
 export const applyPlans = async (

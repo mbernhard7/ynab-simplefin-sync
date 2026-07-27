@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync, readFileSync, statSync } from "node:fs";
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, statSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
@@ -9,6 +9,7 @@ import {
     readConfig,
     resolveBudgetId,
     resolveArchiveAccounts,
+    resolveContributions,
     parseArchiveList,
     resolveMappings,
     shadowedByNote,
@@ -201,4 +202,91 @@ test("archiveAccounts defaults to none, round-trips, and the environment overrid
 
     // Nothing configured means nothing is archived.
     assert.deepEqual(resolveArchiveAccounts({ version: 1, mappings: {} }), []);
+});
+
+test("contribution rules are read from the config file", () => {
+    const path = join(tmpdir(), `yss-contrib-${process.pid}-${Math.random()}.json`);
+    writeFileSync(
+        path,
+        JSON.stringify({
+            version: 1,
+            mappings: {},
+            contributions: {
+                since: "2026-07-23",
+                rules: [
+                    {
+                        simplefinId: "ACT-401k",
+                        match: "^contribution$",
+                        sign: "negative",
+                        payee: "401(k) Contribution",
+                        reviewWindow: { from: "01-10", to: "02-15" },
+                    },
+                ],
+            },
+        }),
+    );
+
+    try {
+        const config = readConfig(path);
+        assert.equal(config.contributions?.since, "2026-07-23");
+        assert.equal(config.contributions?.rules.length, 1);
+        assert.equal(config.contributions?.rules[0]!.sign, "negative");
+        assert.deepEqual(config.contributions?.rules[0]!.reviewWindow, { from: "01-10", to: "02-15" });
+    } finally {
+        rmSync(path, { force: true });
+    }
+});
+
+test("a malformed contribution rule is rejected, not quietly dropped", () => {
+    const write = (contributions: unknown): string => {
+        const path = join(tmpdir(), `yss-bad-${process.pid}-${Math.random()}.json`);
+        writeFileSync(path, JSON.stringify({ version: 1, mappings: {}, contributions }));
+        return path;
+    };
+
+    // A rule without a sign would post withdrawals as income.
+    const noSign = write({ rules: [{ simplefinId: "A", match: "x", payee: "P" }] });
+    assert.throws(() => readConfig(noSign), /"sign" to be "positive" or "negative"/);
+    rmSync(noSign, { force: true });
+
+    const noPayee = write({ rules: [{ simplefinId: "A", match: "x", sign: "positive" }] });
+    assert.throws(() => readConfig(noPayee), /missing a non-empty "payee"/);
+    rmSync(noPayee, { force: true });
+
+    const badSince = write({ since: "July", rules: [{ simplefinId: "A", match: "x", sign: "positive", payee: "P" }] });
+    assert.throws(() => readConfig(badSince), /must be a YYYY-MM-DD date/);
+    rmSync(badSince, { force: true });
+});
+
+test("SIMPLEFIN_CONTRIBUTIONS overrides the config file, as the scheduled job needs", () => {
+    const path = join(tmpdir(), `yss-env-${process.pid}-${Math.random()}.json`);
+    writeFileSync(
+        path,
+        JSON.stringify({
+            version: 1,
+            mappings: {},
+            contributions: { rules: [{ simplefinId: "FROM-FILE", match: "x", sign: "positive", payee: "File" }] },
+        }),
+    );
+
+    const previous = process.env.SIMPLEFIN_CONTRIBUTIONS;
+    try {
+        const config = readConfig(path);
+
+        process.env.SIMPLEFIN_CONTRIBUTIONS = JSON.stringify({
+            since: "2026-07-23",
+            rules: [{ simplefinId: "FROM-ENV", match: "y", sign: "negative", payee: "Env" }],
+        });
+        assert.equal(resolveContributions(config)?.rules[0]!.simplefinId, "FROM-ENV");
+
+        process.env.SIMPLEFIN_CONTRIBUTIONS = "";
+        assert.equal(resolveContributions(config)?.rules[0]!.simplefinId, "FROM-FILE");
+
+        process.env.SIMPLEFIN_CONTRIBUTIONS = "{not json";
+        assert.throws(() => resolveContributions(config), /not valid JSON/);
+    } finally {
+        if (previous === undefined) delete process.env.SIMPLEFIN_CONTRIBUTIONS;
+        else process.env.SIMPLEFIN_CONTRIBUTIONS = previous;
+        rmSync(path, { force: true });
+    }
 });
