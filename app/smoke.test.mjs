@@ -1,6 +1,6 @@
 import test from "node:test";
 import assert from "node:assert/strict";
-import { createApp } from "./server.js";
+import { clientIp, createApp } from "./server.js";
 import { syncWorkflowYaml, repoReadme, buildMapValue } from "./public/templates.js";
 
 // --- Templates -------------------------------------------------------------------------
@@ -11,23 +11,40 @@ test("workflow template pins the schedule and the package major", () => {
     assert.match(yaml, /npx ynab-simplefin-sync@3 sync/);
     assert.match(yaml, /workflow_dispatch:/);
     assert.match(yaml, /actions: write/);
+    assert.match(yaml, /contents: write/);
     assert.match(yaml, /workflows\/sync\.yml\/enable/);
     assert.ok(!yaml.includes("\t"), "workflow must not contain tabs");
 });
 
-test("workflow references exactly the four provisioned secrets", () => {
+test("workflow references exactly the provisioned and optional secrets", () => {
     const yaml = syncWorkflowYaml();
     const secrets = [...yaml.matchAll(/secrets\.([A-Z_]+)/g)].map((m) => m[1]);
     assert.deepEqual(
         [...new Set(secrets)].sort(),
-        ["GITHUB_TOKEN", "SIMPLEFIN_ACCESS_URL", "SIMPLEFIN_MAP", "YNAB_API_TOKEN", "YNAB_BUDGET_ID"],
+        [
+            "GITHUB_TOKEN",
+            "SIMPLEFIN_ACCESS_URL",
+            "SIMPLEFIN_ARCHIVE_ACCOUNTS",
+            "SIMPLEFIN_MAP",
+            "SLACK_WEBHOOK_URL",
+            "YNAB_API_TOKEN",
+            "YNAB_BUDGET_ID",
+        ],
     );
 });
 
-test("readme names the budget and the secrets", () => {
+test("optional steps guard on their secret so they no-op when unset", () => {
+    const yaml = syncWorkflowYaml();
+    assert.match(yaml, /if \[ -z "\$ARCHIVING" \]/);
+    assert.match(yaml, /if \[ -z "\$SLACK_WEBHOOK_URL" \]; then exit 0; fi/);
+});
+
+test("readme names the budget, the secrets, and the optional features", () => {
     const md = repoReadme("My Budget");
     assert.match(md, /\*\*My Budget\*\*/);
     assert.match(md, /SIMPLEFIN_MAP/);
+    assert.match(md, /SLACK_WEBHOOK_URL/);
+    assert.match(md, /SIMPLEFIN_ARCHIVE_ACCOUNTS/);
 });
 
 test("buildMapValue formats and skips unmapped accounts", () => {
@@ -39,6 +56,19 @@ test("buildMapValue formats and skips unmapped accounts", () => {
         ]),
         "y1=ACT-1+ACT-2;y3=ACT-3",
     );
+});
+
+test("clientIp trusts only the proxy-appended X-Forwarded-For entry", () => {
+    const req = (xff, socketAddr = "10.0.0.1") => ({
+        headers: xff === undefined ? {} : { "x-forwarded-for": xff },
+        socket: { remoteAddress: socketAddr },
+    });
+
+    // Cloud Run appends the observed client IP last; earlier entries are client-supplied.
+    assert.equal(clientIp(req("203.0.113.9")), "203.0.113.9");
+    assert.equal(clientIp(req("spoofed.example, 203.0.113.9")), "203.0.113.9");
+    assert.equal(clientIp(req(undefined)), "10.0.0.1");
+    assert.equal(clientIp(req("  ")), "10.0.0.1");
 });
 
 // --- Server ----------------------------------------------------------------------------
@@ -73,13 +103,23 @@ test("server routes", async (t) => {
         assert.equal(res.status, 200);
         assert.match(res.headers.get("content-type"), /text\/html/);
         assert.match(res.headers.get("content-security-policy"), /frame-ancestors 'none'/);
-        assert.match(await res.text(), /Connect GitHub/);
+        const html = await res.text();
+        assert.match(html, /Connect GitHub/);
+        assert.match(html, /id="about"/);
+        assert.match(html, /favicon\.svg/);
+    });
+
+    await t.test("serves the favicon as SVG", async () => {
+        const res = await fetch(`${base}/favicon.svg`);
+        assert.equal(res.status, 200);
+        assert.match(res.headers.get("content-type"), /image\/svg\+xml/);
+        assert.match(await res.text(), /<svg/);
     });
 
     await t.test("config endpoint exposes no secrets", async () => {
         const res = await fetch(`${base}/config`);
         const body = await res.json();
-        assert.deepEqual(Object.keys(body).sort(), ["app_slug", "configured", "simplefin_hosts"]);
+        assert.deepEqual(Object.keys(body).sort(), ["app_slug", "commit", "configured", "simplefin_hosts"]);
     });
 
     await t.test("login redirects to GitHub with a state cookie", async () => {
@@ -91,9 +131,19 @@ test("server routes", async (t) => {
         assert.match(res.headers.get("set-cookie"), /oauth_state=[0-9a-f]{32}; HttpOnly/);
     });
 
-    await t.test("callback rejects a state mismatch", async () => {
+    await t.test("callback bounces a state mismatch to the wizard without exchanging", async () => {
         const res = await fetch(`${base}/callback?code=x&state=y`, { redirect: "manual" });
-        assert.equal(res.status, 400);
+        assert.equal(res.status, 302);
+        assert.equal(res.headers.get("location"), "/#oauth-restart");
+    });
+
+    await t.test("install plants a state cookie and passes state to GitHub", async () => {
+        const res = await fetch(`${base}/install`, { redirect: "manual" });
+        assert.equal(res.status, 302);
+        const location = res.headers.get("location");
+        assert.match(location, /^https:\/\/github\.com\/apps\/test-app\/installations\/new\?state=[0-9a-f]{32}$/);
+        const state = location.match(/state=([0-9a-f]{32})/)[1];
+        assert.match(res.headers.get("set-cookie"), new RegExp(`oauth_state=${state}; HttpOnly`));
     });
 
     await t.test("static path traversal is blocked", async () => {
@@ -135,11 +185,16 @@ test("server routes", async (t) => {
     });
 });
 
-test("setup page is reachable when unconfigured", async (t) => {
+test("setup page is reachable when unconfigured and requests narrow permissions", async (t) => {
     const { server, base } = await startServer({ clientId: "" });
     t.after(() => server.close());
 
     const res = await fetch(`${base}/setup`);
     assert.equal(res.status, 200);
-    assert.match(await res.text(), /settings\/apps\/new/);
+    const html = await res.text();
+    assert.match(html, /settings\/apps\/new/);
+    // Manifest is JSON.stringify'd then HTML-escaped into the form value.
+    assert.match(html, /&quot;contents&quot;:&quot;write&quot;/);
+    assert.match(html, /&quot;secrets&quot;:&quot;write&quot;/);
+    assert.ok(!html.includes("administration"), "manifest must not request administration");
 });

@@ -83,8 +83,14 @@ const pickUpToken = () => {
 };
 
 const initGithub = async () => {
+    const restarted = location.hash.includes("oauth-restart");
+    if (restarted) history.replaceState(null, "", location.pathname);
+
     const token = pickUpToken();
-    if (!token) return;
+    if (!token) {
+        if (restarted) setStatus("github-status", "That sign-in attempt expired — click Connect GitHub.", "error");
+        return;
+    }
 
     state.ghToken = token;
     try {
@@ -140,10 +146,49 @@ const verifySimplefin = async () => {
         state.accessUrl = accessUrl;
         state.simplefinAccounts = data.accounts;
         setStatus("simplefin-status", `Found ${data.accounts.length} account(s) ✓`, "ok");
+        renderArchiveOptions();
         unlock("step-ynab");
     } catch (err) {
         setStatus("simplefin-status", err.message, "error");
     }
+};
+
+// --- Optional extras -------------------------------------------------------------------
+
+const renderArchiveOptions = () => {
+    const container = $("archive-list");
+
+    const allLabel = document.createElement("label");
+    const allBox = document.createElement("input");
+    allBox.type = "checkbox";
+    allBox.id = "archive-all";
+    allLabel.append(allBox, " All accounts, including ones you connect later");
+
+    const perAccount = state.simplefinAccounts.map((sf) => {
+        const label = document.createElement("label");
+        const box = document.createElement("input");
+        box.type = "checkbox";
+        box.dataset.archive = sf.id;
+        const org = sf.org?.name ?? sf.org?.domain ?? "?";
+        label.append(box, ` ${org} · ${sf.name}`);
+        return label;
+    });
+
+    allBox.addEventListener("change", () => {
+        for (const box of container.querySelectorAll("input[data-archive]")) {
+            box.disabled = allBox.checked;
+        }
+    });
+
+    container.replaceChildren(allLabel, ...perAccount);
+};
+
+/** `'all'`, a `;`-joined id list, or `''` for no archiving. */
+const archiveSelection = () => {
+    if ($("archive-all")?.checked) return "all";
+    return [...document.querySelectorAll("#archive-list input[data-archive]:checked")]
+        .map((box) => box.dataset.archive)
+        .join(";");
 };
 
 // --- Step 3: YNAB ----------------------------------------------------------------------
@@ -288,9 +333,14 @@ const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const provision = async () => {
     const repo = $("repo-name").value.trim();
     const mappings = currentMappings();
+    const slackWebhook = $("slack-input").value.trim();
+    const archiveAccounts = archiveSelection();
 
     if (!/^[A-Za-z0-9._-]+$/.test(repo)) return setStatus("map-status", "Invalid repository name.", "error");
     if (mappings.length === 0) return setStatus("map-status", "Map at least one account first.", "error");
+    if (slackWebhook && !slackWebhook.startsWith("https://hooks.slack.com/")) {
+        return setStatus("map-status", "Slack webhook should start with https://hooks.slack.com/ — or leave it empty.", "error");
+    }
 
     $("create-button").disabled = true;
     $("create-log").textContent = "";
@@ -298,36 +348,18 @@ const provision = async () => {
     try {
         await sodium.ready;
 
-        log(`Creating private repository ${state.ghLogin}/${repo}…`);
+        log(`Checking access to ${state.ghLogin}/${repo}…`);
         try {
-            await gh("/user/repos", {
-                method: "POST",
-                body: JSON.stringify({
-                    name: repo,
-                    private: true,
-                    description: "Automated YNAB ↔ SimpleFIN balance sync",
-                    auto_init: true,
-                }),
-            });
-            log("  created ✓");
-            await sleep(1500); // let auto-init land before the contents API writes
+            await gh(`/repos/${state.ghLogin}/${repo}`);
+            log("  accessible ✓");
         } catch (err) {
-            if (err.status === 422 && /already exists/i.test(err.message)) {
-                if (!confirm(`Repository "${repo}" already exists. Update it in place (workflow + secrets)?`)) {
-                    throw new Error("Cancelled.");
-                }
-                log("  exists — updating in place");
-            } else if (err.status === 403 || err.status === 404) {
-                const install = state.appSlug
-                    ? `https://github.com/apps/${state.appSlug}/installations/new`
-                    : "https://github.com/settings/installations";
-                window.open(install, "_blank");
+            if (err.status === 404 || err.status === 403) {
                 throw new Error(
-                    "GitHub denied repository access. Install the app on your account (choose “All repositories”), then click Create again.",
+                    `Can't access ${state.ghLogin}/${repo}. Create the repository (step 1 link), ` +
+                    "then install this app on it (step 2 link, “Only select repositories”), then try again.",
                 );
-            } else {
-                throw err;
             }
+            throw err;
         }
 
         log("Adding workflow…");
@@ -338,19 +370,24 @@ const provision = async () => {
 
         log("Sealing secrets in this browser…");
         const keyData = await gh(`/repos/${state.ghLogin}/${repo}/actions/secrets/public-key`);
-        for (const [name, value] of [
+        const secrets = [
             ["SIMPLEFIN_ACCESS_URL", state.accessUrl],
             ["YNAB_API_TOKEN", state.ynabToken],
             ["YNAB_BUDGET_ID", state.budgetId],
             ["SIMPLEFIN_MAP", buildMapValue(mappings)],
-        ]) {
+            ...(slackWebhook ? [["SLACK_WEBHOOK_URL", slackWebhook]] : []),
+            ...(archiveAccounts ? [["SIMPLEFIN_ARCHIVE_ACCOUNTS", archiveAccounts]] : []),
+        ];
+        for (const [name, value] of secrets) {
             await putSecret(repo, keyData, name, value);
             log(`  ${name} ✓`);
         }
+        if (!slackWebhook) log("  (Slack notifications off — add a SLACK_WEBHOOK_URL secret to enable)");
+        if (!archiveAccounts) log("  (archiving off — add a SIMPLEFIN_ARCHIVE_ACCOUNTS secret to enable)");
 
-        log("Starting a dry run…");
+        log("Starting a dry run (GitHub can take up to a minute to index a new workflow)…");
         let dispatched = false;
-        for (let attempt = 0; attempt < 6 && !dispatched; attempt += 1) {
+        for (let attempt = 0; attempt < 12 && !dispatched; attempt += 1) {
             try {
                 await gh(`/repos/${state.ghLogin}/${repo}/actions/workflows/sync.yml/dispatches`, {
                     method: "POST",
@@ -358,10 +395,11 @@ const provision = async () => {
                 });
                 dispatched = true;
             } catch {
-                await sleep(3000); // workflow indexing lags the file push briefly
+                if (attempt === 3) log("  still waiting for GitHub to index the workflow…");
+                await sleep(5000);
             }
         }
-        log(dispatched ? "  dry run started ✓" : "  couldn't start a dry run — run it from the Actions tab.");
+        log(dispatched ? "  dry run started ✓" : "  GitHub never indexed it in time — run it from the Actions tab (harmless).");
 
         $("done-repo").href = `https://github.com/${state.ghLogin}/${repo}`;
         $("done-actions").href = `https://github.com/${state.ghLogin}/${repo}/actions`;
@@ -381,6 +419,13 @@ const init = async () => {
     } catch {
         // non-fatal
     }
+
+    // /install plants the CSRF state cookie before sending the user to GitHub, so the
+    // post-install callback carries a state we recognize.
+    $("install-link").href = "/install";
+    $("repo-name").addEventListener("input", () => {
+        $("new-repo-link").href = `https://github.com/new?name=${encodeURIComponent($("repo-name").value.trim())}`;
+    });
 
     $("simplefin-verify").addEventListener("click", verifySimplefin);
     $("ynab-verify").addEventListener("click", verifyYnab);

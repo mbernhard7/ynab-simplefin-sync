@@ -3,6 +3,15 @@ name: Release
 on:
   push:
     branches: [main]
+    # Publish only when the package itself changes. App/docs/CI-only merges skip the
+    # release naturally, without [skip ci] — which Cloud Build also honors and which
+    # was therefore suppressing the app's deploy trigger.
+    paths:
+      - "src/**"
+      - "test/**"
+      - "package.json"
+      - "package-lock.json"
+      - "tsconfig*.json"
   workflow_dispatch:
     inputs:
       level:

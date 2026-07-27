@@ -10,6 +10,12 @@ for the difference. No positions, tickers, or price feeds.
 Optionally it also picks payroll contributions out of the transaction feed and posts them as their
 own transactions *first*, so the adjustment that follows covers only market movement.
 
+> [!TIP]
+> **No-install setup:** [ynab-simplefin-sync.milesbernhard.com](https://ynab-simplefin-sync.milesbernhard.com)
+> provisions the sync into a repository in your own GitHub account — credentials are sealed in
+> your browser and stored only as encrypted secrets in that repo. This is the only official
+> hosted instance; see [`app/`](app/README.md) for how it works.
+
 ```
 $ ynab-simplefin-sync sync
 [YSS] Fetching YNAB accounts...

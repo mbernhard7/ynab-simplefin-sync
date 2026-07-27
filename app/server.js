@@ -106,6 +106,20 @@ const parseCookies = (header = "") =>
             .filter((p) => p.length === 2),
     );
 
+/**
+ * Client IP behind Cloud Run's proxy. Google appends the IP it observed as the LAST entry of
+ * X-Forwarded-For, so that entry is trustworthy; anything earlier is client-supplied. Falls
+ * back to the socket address for local development.
+ */
+export const clientIp = (req) => {
+    const xff = req.headers["x-forwarded-for"];
+    if (typeof xff === "string" && xff.trim() !== "") {
+        const parts = xff.split(",").map((p) => p.trim()).filter(Boolean);
+        if (parts.length > 0) return parts[parts.length - 1];
+    }
+    return req.socket.remoteAddress ?? "unknown";
+};
+
 /** Naive fixed-window rate limiter, per IP, for the relay endpoints. */
 const makeRateLimiter = (max = 30, windowMs = 60_000) => {
     const hits = new Map();
@@ -142,22 +156,42 @@ export const createApp = (config = defaultConfig()) => {
 
     // --- OAuth -----------------------------------------------------------------------
 
+    /** Redirects to `buildUrl(state)` with the state planted in a cookie for /callback. */
+    const redirectWithState = (res, buildUrl) => {
+        const state = randomBytes(16).toString("hex");
+        send(res, 302, "", {
+            Location: buildUrl(state),
+            "Set-Cookie": `oauth_state=${state}; HttpOnly; Secure; SameSite=Lax; Max-Age=600; Path=/`,
+        });
+    };
+
     const login = (res) => {
         if (!config.clientId) {
             if (config.setupMode) return send(res, 302, "", { Location: "/setup" });
             return send(res, 500, "GITHUB_CLIENT_ID is not configured.");
         }
 
-        const state = randomBytes(16).toString("hex");
-        const url = new URL("https://github.com/login/oauth/authorize");
-        url.searchParams.set("client_id", config.clientId);
-        url.searchParams.set("state", state);
-        if (config.baseUrl) url.searchParams.set("redirect_uri", `${config.baseUrl}/callback`);
-
-        send(res, 302, "", {
-            Location: url.toString(),
-            "Set-Cookie": `oauth_state=${state}; HttpOnly; Secure; SameSite=Lax; Max-Age=600; Path=/`,
+        redirectWithState(res, (state) => {
+            const url = new URL("https://github.com/login/oauth/authorize");
+            url.searchParams.set("client_id", config.clientId);
+            url.searchParams.set("state", state);
+            if (config.baseUrl) url.searchParams.set("redirect_uri", `${config.baseUrl}/callback`);
+            return url.toString();
         });
+    };
+
+    /**
+     * The install flow also ends at /callback (request_oauth_on_install), so it must carry a
+     * state we planted — GitHub echoes the `state` given to the install page.
+     */
+    const install = (res) => {
+        if (!config.appSlug) {
+            return send(res, 302, "", { Location: "https://github.com/settings/installations" });
+        }
+        redirectWithState(
+            res,
+            (state) => `https://github.com/apps/${config.appSlug}/installations/new?state=${state}`,
+        );
     };
 
     const callback = async (req, res, url) => {
@@ -165,8 +199,11 @@ export const createApp = (config = defaultConfig()) => {
         const state = url.searchParams.get("state");
         const cookieState = parseCookies(req.headers.cookie).oauth_state;
 
+        // A missing or mismatched state means we didn't initiate this flow — never exchange
+        // the code (an attacker-supplied code would bind their identity to this session).
+        // Bounce to the wizard instead of a dead-end error page.
         if (!code || !state || !cookieState || state !== cookieState) {
-            return send(res, 400, "OAuth state mismatch. Start again from the home page.");
+            return send(res, 302, "", { Location: "/#oauth-restart" });
         }
 
         const tokenRes = await fetch("https://github.com/login/oauth/access_token", {
@@ -269,8 +306,9 @@ export const createApp = (config = defaultConfig()) => {
         callback_urls: [`${config.baseUrl}/callback`],
         request_oauth_on_install: true,
         public: true,
+        // No administration permission: the user creates the repo themselves and installs the
+        // app on just that repo, so the grant is scoped to a single repository they picked.
         default_permissions: {
-            administration: "write",
             contents: "write",
             workflows: "write",
             secrets: "write",
@@ -336,20 +374,15 @@ GITHUB_APP_SLUG=${escapeHtml(app.slug)}</pre>
                     configured: Boolean(config.clientId),
                     app_slug: config.appSlug,
                     simplefin_hosts: config.simplefinHosts,
+                    commit: process.env.APP_COMMIT ?? "unknown",
                 });
             }
             if (route === "GET /login") return login(res);
-            if (route === "GET /install") {
-                if (!config.appSlug) return send(res, 404, "GITHUB_APP_SLUG is not configured.");
-                return send(res, 302, "", {
-                    Location: `https://github.com/apps/${config.appSlug}/installations/new`,
-                });
-            }
+            if (route === "GET /install") return install(res);
             if (route === "GET /callback") return await callback(req, res, url);
 
             if (url.pathname.startsWith("/api/")) {
-                const ip = req.socket.remoteAddress ?? "unknown";
-                if (!allowRate(ip)) return sendJson(res, 429, { error: "Slow down." });
+                if (!allowRate(clientIp(req))) return sendJson(res, 429, { error: "Slow down." });
                 if (route === "POST /api/claim") return await claim(req, res);
                 if (route === "POST /api/simplefin/accounts") return await simplefinAccounts(req, res);
                 return sendJson(res, 404, { error: "not found" });

@@ -11,7 +11,7 @@ The server never stores credentials, and never sees most of them:
 | Credential | Path |
 |---|---|
 | YNAB token | Browser → YNAB API and browser → sealed repo secret. Never touches this server. |
-| GitHub token | Short-lived OAuth user token; exchanged by the server, delivered to the browser in a URL fragment, held in `sessionStorage`. Never stored. |
+| GitHub token | Short-lived OAuth user token; exchanged by the server, delivered to the browser in a URL fragment, held in `sessionStorage`. Never stored. Scoped to the single repository the user installed the app on. |
 | SimpleFIN access URL | Relayed through this server per request (the Bridge sends no CORS headers), never stored or logged. Stored only as the repo's sealed secret. |
 
 Secrets are sealed in the browser with libsodium (`crypto_box_seal`) against the repository's
@@ -24,7 +24,10 @@ inactivity timer each run, so no PAT is ever needed.
 - `server.js` — zero-dependency Node server: static frontend, GitHub OAuth code exchange,
   stateless SimpleFIN relay (host-allowlisted), one-time GitHub App manifest setup.
 - `public/app.js` — the wizard. All GitHub/YNAB API calls run client-side.
-- `public/templates.js` — the workflow + README provisioned into user repos.
+- `public/templates.js` — the workflow + README provisioned into user repos. The workflow
+  includes optional Slack notifications and same-repo transaction archiving; both are offered
+  in the wizard and no-op unless their secret exists, so they can be toggled later by adding
+  or removing the secret.
 - `public/vendor/` — libsodium-wrappers `0.7.15`, vendored from npm
   (`libsodium.js` sha256 `0a66b0fd…`, `libsodium-wrappers.js` sha256 `82888473…`).
 
@@ -36,9 +39,10 @@ inactivity timer each run, so no PAT is ever needed.
 2. Set those as environment variables and redeploy. `/setup` disables itself once a client id
    is configured.
 
-The app requests repository permissions: Administration (write), Contents (write), Workflows
-(write), Secrets (write), Metadata (read). Users should install it with **All repositories**
-so the repo the wizard creates is covered.
+The app requests repository permissions: Contents (write), Workflows (write), Secrets (write),
+Metadata (read) — no administration access. Users create the sync repository themselves and
+install the app with **Only select repositories**, scoped to that single repo, so the grant
+never extends past the one repository they picked.
 
 ## Environment
 
