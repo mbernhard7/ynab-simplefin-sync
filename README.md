@@ -11,7 +11,7 @@ Optionally it also picks payroll contributions out of the transaction feed and p
 own transactions *first*, so the adjustment that follows covers only market movement.
 
 > [!TIP]
-> **No-install setup:** [ynab-simplefin-sync.milesbernhard.com](https://ynab-simplefin-sync.milesbernhard.com)
+> **No-install setup:** [ynab-simplefin-sync.milestomorrow.com](https://ynab-simplefin-sync.milestomorrow.com)
 > provisions the sync into a repository in your own GitHub account — credentials are sealed in
 > your browser and stored only as encrypted secrets in that repo. This is the only official
 > hosted instance; see [`app/`](app/README.md) for how it works.
