@@ -1,7 +1,3 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
-  <rect width="64" height="64" rx="14" fill="#2f6feb"/>
-  <path d="M16 24h26" stroke="#fff" stroke-width="6" stroke-linecap="round"/>
-  <path d="M42 16l10 8-10 8z" fill="#fff"/>
-  <path d="M48 40H22" stroke="#fff" stroke-width="6" stroke-linecap="round"/>
-  <path d="M22 32l-10 8 10 8z" fill="#fff"/>
-</svg>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="1" x2="1" y2="0">
+<stop offset="0" stop-color="#bfdbfe"/><stop offset="0.55" stop-color="#60a5fa"/><stop offset="1" stop-color="#2563eb"/>
+</linearGradient></defs><rect width="64" height="64" rx="16" fill="url(#g)"/><path d="M16 24h26" stroke="#0a0c12" stroke-width="6" stroke-linecap="round"/><path d="M42 16l10 8-10 8z" fill="#0a0c12"/><path d="M48 40H22" stroke="#0a0c12" stroke-width="6" stroke-linecap="round"/><path d="M22 32l-10 8 10 8z" fill="#0a0c12"/></svg>
