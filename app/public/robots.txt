@@ -1,0 +1,5 @@
+# Served by the app; this host is not behind Cloudflare's managed robots.txt.
+User-agent: *
+Allow: /
+
+Sitemap: https://milestomorrow.com/sitemap.xml

@@ -1,0 +1,17 @@
+{
+  "name": "SimpleFIN Sync",
+  "blurb": "Provisions the sync into your own GitHub account. Credentials are sealed in your browser.",
+  "about": "A no-install provisioner: it writes the sync into a repository in the visitor's own GitHub account, sealing credentials in the browser and storing them only as encrypted Actions secrets in that repo. The server never holds a token.",
+  "stack": [
+    "SimpleFIN",
+    "YNAB API",
+    "GitHub Actions",
+    "Cloud Run"
+  ],
+  "role": "solo",
+  "year": 2026,
+  "status": "live",
+  "card": {
+    "image": "/og.png"
+  }
+}
