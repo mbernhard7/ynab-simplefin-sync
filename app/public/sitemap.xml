@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Referenced by the sitemap index at https://milestomorrow.com/sitemap.xml.
+  Lists only this host; keep it beside the pages it describes so adding a page
+  here never means editing another repo.
+-->
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://ynab-simplefin-sync.milestomorrow.com/</loc>
+    <lastmod>2026-08-13</lastmod>
+  </url>
+</urlset>
