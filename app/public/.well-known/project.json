@@ -1,7 +1,7 @@
 {
   "name": "SimpleFIN Sync",
   "blurb": "Provisions the sync into your own GitHub account. Credentials are sealed in your browser.",
-  "about": "A no-install provisioner: it writes the sync into a repository in the visitor's own GitHub account, sealing credentials in the browser and storing them only as encrypted Actions secrets in that repo. The server never holds a token.",
+  "about": "Keeps investment accounts current in YNAB by provisioning the sync into the visitor's own GitHub account rather than running it centrally. Credentials are sealed in the browser with WebCrypto and stored only as encrypted Actions secrets in that repo, so this server never holds a token. The engine also ships as an npm package.",
   "stack": [
     "SimpleFIN",
     "YNAB API",
