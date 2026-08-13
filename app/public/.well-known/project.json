@@ -1,7 +1,7 @@
 {
   "name": "ynab-simplefin-sync",
   "blurb": "Provisions the sync into your own GitHub account. Credentials are sealed in your browser.",
-  "about": "A CLI, published on npm, that reconciles YNAB account balances against SimpleFIN Bridge \u2014 it fetches what each account is actually worth and posts a single balance adjustment per account. Guided setup, dry-run previews, and CI-tested.",
+  "about": "A CLI, published on npm, that reconciles YNAB account balances against SimpleFIN Bridge \u2014 it fetches what each account is actually worth and posts a single balance adjustment per account. Guided setup, dry-run previews, and CI-tested. Or skip the CLI: the hosted app installs a GitHub App onto one repository you pick \u2014 it asks for no administration scope, so you create the repo and it touches nothing else \u2014 then provisions the scheduled sync there, with credentials sealed in your browser and written straight to that repo's encrypted secrets.",
   "stack": [
     "Node.js",
     "CLI",
