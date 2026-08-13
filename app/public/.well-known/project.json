@@ -1,5 +1,5 @@
 {
-  "name": "SimpleFIN Sync",
+  "name": "ynab-simplefin-sync",
   "blurb": "Provisions the sync into your own GitHub account. Credentials are sealed in your browser.",
   "about": "A CLI, published on npm, that reconciles YNAB account balances against SimpleFIN Bridge \u2014 it fetches what each account is actually worth and posts a single balance adjustment per account. Guided setup, dry-run previews, and CI-tested.",
   "stack": [
@@ -9,9 +9,20 @@
     "YNAB API",
     "SimpleFIN"
   ],
-  "role": "solo",
-  "year": 2026,
-  "status": "live",
+  "links": [
+    {
+      "label": "View on GitHub",
+      "href": "https://github.com/mbernhard7/ynab-simplefin-sync"
+    },
+    {
+      "label": "Live app",
+      "href": "https://ynab-simplefin-sync.milestomorrow.com"
+    },
+    {
+      "label": "npm",
+      "href": "https://www.npmjs.com/package/ynab-simplefin-sync"
+    }
+  ],
   "card": {
     "image": "/og.png"
   }
