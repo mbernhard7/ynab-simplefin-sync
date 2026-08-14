@@ -168,3 +168,18 @@ pre {
 footer { color: var(--muted); font-size: 0.8rem; margin-top: 2.5rem; }
 
 a { color: var(--accent); }
+
+/* iOS inflates text inside long blocks unless told not to; a boosted credit
+   line outgrows its box and stops looking centred. */
+html { -webkit-text-size-adjust: 100%; }
+
+/* The copyright line is almost exactly a phone's width, so it reads as jammed
+   against both edges. Give it real gutters — the shared footer carries its own
+   inline styles, so overriding them takes !important. */
+@media (max-width: 480px) {
+  .built-by {
+    padding-left: 28px !important;
+    padding-right: 28px !important;
+  }
+  .built-by span { font-size: 12.5px; }
+}
