@@ -27,8 +27,25 @@
     <meta name="twitter:title" content="SimpleFIN Sync — Your investments, always current in YNAB." />
     <meta name="twitter:description" content="Provisions the sync into your own GitHub account. Credentials are sealed in your browser." />
     <meta name="twitter:image" content="https://ynab-simplefin-sync.milestomorrow.com/og.png" />
-    <script async src="https://www.googletagmanager.com/gtag/js?id=G-RBTKWG11TT"></script>
-    <script>window.dataLayer=window.dataLayer||[];function gtag(){dataLayer.push(arguments);}gtag("js",new Date());gtag("config","G-RBTKWG11TT");</script>
+    <script>
+      // Analytics, with an owner kill switch: visiting any page with ?notrack=1
+      // sets a device-local flag that silences GA (?notrack=0 clears it).
+      (function () {
+        try {
+          var q = new URLSearchParams(location.search);
+          if (q.has("notrack")) q.get("notrack") === "0" ? localStorage.removeItem("mt-notrack") : localStorage.setItem("mt-notrack", "1");
+          if (localStorage.getItem("mt-notrack")) return;
+        } catch (e) {}
+        var g = document.createElement("script");
+        g.async = true;
+        g.src = "https://www.googletagmanager.com/gtag/js?id=G-RBTKWG11TT";
+        document.head.appendChild(g);
+        window.dataLayer = window.dataLayer || [];
+        window.gtag = function () { dataLayer.push(arguments); };
+        gtag("js", new Date());
+        gtag("config", "G-RBTKWG11TT");
+      })();
+    </script>
     <!-- site-standards:end -->
   </head>
 <body>
