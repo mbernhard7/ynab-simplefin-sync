@@ -34,7 +34,7 @@ const SECURITY_HEADERS = {
     // stay in its own file (public/analytics.js) rather than inline.
     "Content-Security-Policy": [
         "default-src 'self'",
-        "connect-src 'self' https://api.github.com https://api.ynab.com https://beta-bridge.simplefin.org https://bridge.simplefin.org https://*.google-analytics.com https://*.analytics.google.com",
+        "connect-src 'self' https://api.github.com https://api.ynab.com https://beta-bridge.simplefin.org https://bridge.simplefin.org https://*.google-analytics.com https://*.analytics.google.com https://www.googletagmanager.com",
         "script-src 'self' 'wasm-unsafe-eval' https://www.googletagmanager.com",
         "style-src 'self'",
         "img-src 'self' data: https://*.google-analytics.com https://*.googletagmanager.com",
