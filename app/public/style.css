@@ -183,13 +183,33 @@ a { color: var(--accent); }
    line outgrows its box and stops looking centred. */
 html { -webkit-text-size-adjust: 100%; }
 
-/* The copyright line is almost exactly a phone's width, so it reads as jammed
-   against both edges. Give it real gutters — the shared footer carries its own
-   inline styles, so overriding them takes !important. */
+/* The shared footer carries its styling in a style attribute, but this app
+   sends `style-src 'self'` with no 'unsafe-inline', so the browser drops that
+   attribute outright — the credit line lost its centring and its padding.
+   Restate the same declarations here, where the CSP allows them. Keep this in
+   step with the footer markup if that block ever changes. */
+.built-by {
+  display: block;
+  width: 100%;
+  box-sizing: border-box;
+  clear: both;
+  float: none;
+  text-align: center;
+  padding: 30px 20px;
+  margin: 0;
+  font: 14px/1.6 ui-sans-serif, -apple-system, system-ui, sans-serif;
+  color: #8b93a1;
+  background: transparent;
+}
+.built-by a { color: inherit; text-decoration: underline; }
+.built-by span { opacity: 0.75; }
+
+/* The copyright line is almost exactly a phone's width, so give it real
+   gutters and step it down slightly. */
 @media (max-width: 480px) {
   .built-by {
-    padding-left: 28px !important;
-    padding-right: 28px !important;
+    padding-left: 28px;
+    padding-right: 28px;
   }
   .built-by span { font-size: 12.5px; }
 }
