@@ -28,12 +28,16 @@ const CONTENT_TYPES = {
 const SECURITY_HEADERS = {
     "X-Content-Type-Options": "nosniff",
     "Referrer-Policy": "no-referrer",
+    // GA4 needs three narrow additions: the tag script itself, the endpoints it
+    // beacons to, and its pixel fallback. Everything else stays closed — in
+    // particular 'unsafe-inline' is still absent, so the analytics gate has to
+    // stay in its own file (public/analytics.js) rather than inline.
     "Content-Security-Policy": [
         "default-src 'self'",
-        "connect-src 'self' https://api.github.com https://api.ynab.com https://beta-bridge.simplefin.org https://bridge.simplefin.org",
-        "script-src 'self' 'wasm-unsafe-eval'",
+        "connect-src 'self' https://api.github.com https://api.ynab.com https://beta-bridge.simplefin.org https://bridge.simplefin.org https://*.google-analytics.com https://*.analytics.google.com",
+        "script-src 'self' 'wasm-unsafe-eval' https://www.googletagmanager.com",
         "style-src 'self'",
-        "img-src 'self' data:",
+        "img-src 'self' data: https://*.google-analytics.com https://*.googletagmanager.com",
         "frame-ancestors 'none'",
         "base-uri 'none'",
     ].join("; "),

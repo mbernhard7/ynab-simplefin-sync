@@ -27,37 +27,9 @@
     <meta name="twitter:title" content="SimpleFIN Sync — Your investments, always current in YNAB." />
     <meta name="twitter:description" content="Provisions the sync into your own GitHub account. Credentials are sealed in your browser." />
     <meta name="twitter:image" content="https://ynab-simplefin-sync.milestomorrow.com/og.png" />
-    <script>
-      // Analytics, with an owner kill switch: visiting any page with ?notrack=1
-      // silences the analytics tags (?notrack=0 clears it). The flag is a cookie
-      // scoped to .milestomorrow.com, so one visit covers every site on the domain.
-      // localStorage is still read, so per-origin opt-outs made before this keep
-      // working, and still written for hosts a domain cookie cannot reach.
-      (function () {
-        var KEY = "mt-notrack";
-        try {
-          var q = new URLSearchParams(location.search);
-          if (q.has("notrack")) {
-            var off = q.get("notrack") === "0";
-            document.cookie =
-              KEY + "=" + (off ? "" : "1") +
-              ";domain=.milestomorrow.com;path=/;max-age=" + (off ? 0 : 315360000) +
-              ";samesite=lax" + (location.protocol === "https:" ? ";secure" : "");
-            off ? localStorage.removeItem(KEY) : localStorage.setItem(KEY, "1");
-          }
-          if (document.cookie.indexOf(KEY + "=1") > -1) return;
-          if (localStorage.getItem(KEY)) return;
-        } catch (e) {}
-        var g = document.createElement("script");
-        g.async = true;
-        g.src = "https://www.googletagmanager.com/gtag/js?id=G-RBTKWG11TT";
-        document.head.appendChild(g);
-        window.dataLayer = window.dataLayer || [];
-        window.gtag = function () { dataLayer.push(arguments); };
-        gtag("js", new Date());
-        gtag("config", "G-RBTKWG11TT");
-      })();
-    </script>
+    <!-- The gate lives in a file, not inline: this app sends `script-src 'self'`,
+         which refuses inline scripts, so the inline copy never ran. -->
+    <script src="/analytics.js" data-ga="G-RBTKWG11TT"></script>
     <!-- site-standards:end -->
   </head>
 <body>
