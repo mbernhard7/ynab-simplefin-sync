@@ -24,12 +24,22 @@
 
 * { box-sizing: border-box; }
 
+/* Something on this page is wider than a phone screen, which makes the document
+   scroll sideways. Centred content (main) then drifts right while the full-width
+   footer stays pinned at the document's left edge, so the credit line reads as
+   jammed against the side. Stop the sideways scroll at the root and let long
+   tokens break instead of stretching the page. */
+html, body { max-width: 100%; overflow-x: hidden; }
+
 body {
     margin: 0;
     background: var(--bg);
     color: var(--text);
     font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    overflow-wrap: break-word;
 }
+
+img, svg, pre, table, iframe { max-width: 100%; }
 
 main { max-width: 720px; margin: 0 auto; padding: 2.5rem 1.25rem 4rem; }
 main.narrow { max-width: 560px; }
