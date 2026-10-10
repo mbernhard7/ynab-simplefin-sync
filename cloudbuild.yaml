@@ -21,6 +21,7 @@ steps:
         "--image", "${_IMAGE}",
         "--region", "${_REGION}",
         "--update-env-vars", "APP_COMMIT=${COMMIT_SHA}",
+        "--max-instances", "1",
         "--quiet",
       ]
 

@@ -247,3 +247,17 @@ test("skips closed, non-USD, and unparseable accounts", () => {
     const deleted = reconcile([ynab({ deleted: true })], set([sfAccount({ id: "ACT-1" })]), { now: NOW });
     assert.equal(deleted.length, 0);
 });
+
+test("blocks adjustments when the SimpleFIN-lag guard could not read YNAB", () => {
+    const [plan] = reconcile([ynab()], set([sfAccount({ id: "ACT-1" })]), { now: NOW, lagGuardUnavailable: true });
+
+    assert.equal(plan?.action, "skip");
+    assert.equal(plan?.reason, "lag-guard-unavailable");
+    assert.equal(plan?.deltaMilliunits, 100_000);
+});
+
+test("--force still applies when the lag guard is unavailable, as it does for ynab-ahead", () => {
+    const [plan] = reconcile([ynab()], set([sfAccount({ id: "ACT-1" })]), { now: NOW, lagGuardUnavailable: true, force: true });
+
+    assert.equal(plan?.action, "adjust");
+});

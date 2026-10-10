@@ -209,3 +209,16 @@ export const contributionTotals = (plans: ContributionPlan[]): Map<string, numbe
     }
     return totals;
 };
+
+/**
+ * Splits planned contributions by whether YNAB already holds their `import_id`. A real run
+ * gets this from the bulk endpoint's `duplicate_import_ids`; a dry run has to ask first, or
+ * every preview re-adds deposits that were posted days ago.
+ */
+export const splitAlreadyPosted = (
+    plans: ContributionPlan[],
+    existingImportIds: ReadonlySet<string>,
+): { pending: ContributionPlan[]; present: ContributionPlan[] } => ({
+    pending: plans.filter((p) => !existingImportIds.has(p.importId)),
+    present: plans.filter((p) => existingImportIds.has(p.importId)),
+});

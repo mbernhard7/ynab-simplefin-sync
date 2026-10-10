@@ -1,10 +1,11 @@
 import { API } from "ynab";
 import { getAccounts as getSimpleFinAccounts, MAX_WINDOW_DAYS } from "./simplefin";
 import { localDate, reconcile, type AccountPlan, type ReconcileOptions } from "./reconcile";
-import { applyPlans, getAccounts as getYnabAccounts, getLastActivityByAccount, postTransactions } from "./ynab";
+import { applyPlans, getAccounts as getYnabAccounts, getExistingImportIds, getLastActivityByAccount, postTransactions } from "./ynab";
 import {
     contributionTotals,
     planContributions,
+    splitAlreadyPosted,
     type ContributionPlan,
     type ContributionsConfig,
 } from "./contributions";
@@ -30,6 +31,7 @@ export interface RunOptions extends ReconcileOptions {
 export interface RunSummary {
     plans: AccountPlan[];
     applied: number;
+    /** Adjustments and contribution writes that did not land. */
     failed: number;
     /** Skips caused by a broken upstream connection or a tripped safety guard. */
     blocked: number;
@@ -144,6 +146,7 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
     // them first means the adjustment that follows covers only market movement.
     let contributions: ContributionPlan[] = [];
     let contributionsPosted = 0;
+    let contributionsFailed = 0;
 
     if (contributionRules) {
         contributions = planContributions(accountSet, {
@@ -172,8 +175,14 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
 
         // A dry run writes nothing, so model the effect instead: without this the previewed
         // adjustment is the one you would get with contributions off, which is not the plan.
+        // Only deposits YNAB does not already hold count, or a repeated preview double-counts
+        // the ones posted on earlier days (a real write dedupes by import_id).
         if (contributions.length > 0 && options.dryRun) {
-            const totals = contributionTotals(contributions);
+            const since = contributions.map((p) => p.date).sort()[0] as string;
+            const existing = await getExistingImportIds(api, options.budgetId, since);
+            const { pending, present } = splitAlreadyPosted(contributions, existing);
+            if (present.length > 0) detail(`${present.length} contribution(s) already in YNAB; not modeled.`);
+            const totals = contributionTotals(pending);
             mapped = mapped.map((a) => ({ ...a, balance: a.balance + (totals.get(a.id) ?? 0) }));
         }
 
@@ -192,6 +201,7 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
             );
 
             contributionsPosted = result.created;
+            contributionsFailed = result.failed;
             info(
                 `Contributions: created=${result.created} already-present=${result.duplicate} failed=${result.failed}`,
             );
@@ -209,6 +219,7 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
     // Skip an account whose newest YNAB transaction is later than SimpleFIN's balance-date,
     // so a lagging institution does not revert activity just added in YNAB.
     let lastActivityByAccount: Map<string, string> | undefined;
+    let lagGuardUnavailable = false;
     const mappedSimplefinIds = new Set(mappings.flatMap((m) => m.simplefinIds));
     const balanceDates = accountSet.accounts
         .filter((a) => mappedSimplefinIds.has(a.id))
@@ -219,11 +230,12 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
         try {
             lastActivityByAccount = await getLastActivityByAccount(api, options.budgetId, since);
         } catch (err) {
+            lagGuardUnavailable = true;
             warn(`Could not read YNAB transactions for the SimpleFIN-lag guard: ${err instanceof Error ? err.message : String(err)}`);
         }
     }
 
-    const plans = reconcile(mapped, accountSet, { ...options, mappings, lastActivityByAccount });
+    const plans = reconcile(mapped, accountSet, { ...options, mappings, lastActivityByAccount, lagGuardUnavailable });
 
     info("Plan:");
     for (const plan of plans) {
@@ -242,12 +254,12 @@ export const run = async (options: RunOptions): Promise<RunSummary> => {
 
     if (adjustments.length === 0) {
         info("No balance adjustment needed.");
-        return { plans, applied: 0, failed: 0, blocked, contributions, contributionsPosted };
+        return { plans, applied: 0, failed: contributionsFailed, blocked, contributions, contributionsPosted };
     }
 
     info(`Posting ${adjustments.length} adjustment(s) to YNAB...`);
     const results = await applyPlans(api, options.budgetId, adjustments);
 
     const failed = results.filter((r) => r.outcome === "failed").length;
-    return { plans, applied: results.length - failed, failed, blocked, contributions, contributionsPosted };
+    return { plans, applied: results.length - failed, failed: failed + contributionsFailed, blocked, contributions, contributionsPosted };
 };
