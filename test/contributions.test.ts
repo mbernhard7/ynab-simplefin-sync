@@ -5,6 +5,8 @@ import {
     contributionTotals,
     inMonthDayWindow,
     planContributions,
+    splitAlreadyPosted,
+    type ContributionPlan,
     type ContributionsConfig,
 } from "../src/contributions";
 import type { SimpleFinAccount, SimpleFinAccountSet, SimpleFinTransaction } from "../src/simplefin";
@@ -226,4 +228,12 @@ test("an invalid rule pattern fails loudly rather than matching nothing", () => 
             }),
         /invalid match/,
     );
+});
+
+test("splitAlreadyPosted keeps a contribution YNAB already holds out of the pending set", () => {
+    const plan = (importId: string) => ({ importId, amountMilliunits: 100_000 }) as unknown as ContributionPlan;
+    const { pending, present } = splitAlreadyPosted([plan("YSS:C:a"), plan("YSS:C:b"), plan("YSS:C:c")], new Set(["YSS:C:b"]));
+
+    assert.deepEqual(pending.map((p) => p.importId), ["YSS:C:a", "YSS:C:c"]);
+    assert.deepEqual(present.map((p) => p.importId), ["YSS:C:b"]);
 });

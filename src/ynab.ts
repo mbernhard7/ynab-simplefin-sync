@@ -141,6 +141,16 @@ export const applyPlan = async (api: API, budgetId: string, plan: AccountPlan): 
 };
 
 /** One YNAB transaction to create. */
+/** Every `import_id` on a live transaction since `sinceDate`, for a dry run to dedupe against. */
+export const getExistingImportIds = async (
+    api: API,
+    budgetId: string,
+    sinceDate: string,
+): Promise<Set<string>> => {
+    const { data } = await api.transactions.getTransactions(budgetId, sinceDate);
+    return new Set(data.transactions.filter((t) => !t.deleted && t.import_id).map((t) => t.import_id as string));
+};
+
 export interface PostableTransaction {
     ynabAccountId: string;
     date: string;

@@ -21,7 +21,8 @@ export type SkipReason =
     | "non-usd"
     | "unparseable-balance"
     | "exceeds-threshold"
-    | "ynab-ahead";
+    | "ynab-ahead"
+    | "lag-guard-unavailable";
 
 export interface AccountPlan {
     ynabAccountId: string;
@@ -48,6 +49,8 @@ export interface ReconcileOptions {
     mappings?: { ynabAccountId: string; simplefinIds: string[] }[];
     /** Most recent non-adjustment YNAB transaction date per account, as `YYYY-MM-DD`. */
     lastActivityByAccount?: Map<string, string>;
+    /** The lag guard could not read YNAB; no adjustment is safe without it (unless forced). */
+    lagGuardUnavailable?: boolean;
     now?: Date;
     /** Flag a balance as stale past this age. Stale balances are still reconciled. */
     staleAfterHours?: number;
@@ -189,6 +192,22 @@ export const reconcile = (
 
         if (delta === 0) {
             plans.push({ ...base, action: "noop", targetMilliunits: target, deltaMilliunits: 0, balanceDate, stale });
+            continue;
+        }
+
+        // Without the lag guard a stale SimpleFIN balance could reverse activity just added in
+        // YNAB, so a failed read blocks every adjustment rather than quietly skipping the check.
+        if (!options.force && options.lagGuardUnavailable) {
+            plans.push({
+                ...base,
+                action: "skip",
+                reason: "lag-guard-unavailable",
+                detail: "YNAB transactions could not be read, so recent activity cannot be checked; re-run, or --force",
+                targetMilliunits: target,
+                deltaMilliunits: delta,
+                balanceDate,
+                stale,
+            });
             continue;
         }
 
